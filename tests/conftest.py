@@ -7,6 +7,17 @@ if ROOT not in sys.path:
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+try:
+    import tempfile
+
+    from PySide6.QtCore import QSettings
+
+    # I test non devono toccare le impostazioni reali dell'utente (capitale, opzioni Monte Carlo).
+    QSettings.setDefaultFormat(QSettings.IniFormat)
+    QSettings.setPath(QSettings.IniFormat, QSettings.UserScope, tempfile.mkdtemp(prefix="nt8analyzer-tests-"))
+except ImportError:
+    pass
+
 EXAMPLES_DIR = os.path.join(ROOT, "examples")
 
 NT_SAMPLE = """Trade number,Instrument,Account,Strategy,Market pos.,Qty,Entry price,Exit price,Entry time,Exit time,Entry name,Exit name,Profit,Cum. net profit,Commission,Clearing Fee,Exchange Fee,IP Fee,NFA Fee,MAE,MFE,ETD,Bars,
