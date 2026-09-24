@@ -23,8 +23,8 @@ tasto destro → *Export* per salvare l'immagine.
 
 ### Opzione 1: eseguibile pronto (nessuna installazione)
 
-Ogni push su GitHub compila automaticamente `NT8BacktestAnalyzer.exe`
-(workflow *Build Windows*):
+Ogni push sul branch principale e ogni pull request compilano automaticamente `NT8BacktestAnalyzer.exe`
+(workflow *Build Windows*, avviabile anche a mano da *Actions → Build Windows → Run workflow*):
 
 1. Apri la scheda **Actions** del repository → l'ultima esecuzione di **Build Windows**.
 2. In fondo alla pagina scarica l'artifact **NT8BacktestAnalyzer-windows** (zip).

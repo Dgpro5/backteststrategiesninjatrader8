@@ -2,7 +2,7 @@ name: Build Windows
 
 on:
   push:
-    branches: [main, master, "claude/**"]
+    branches: [main, master]
     tags: ["v*"]
   pull_request:
   workflow_dispatch:
@@ -35,10 +35,9 @@ jobs:
       - name: Crea NT8BacktestAnalyzer.exe
         run: python -m PyInstaller --noconfirm --clean NT8BacktestAnalyzer.spec
 
+      # Plugin grafico nativo di Windows: con "offscreen" Qt su Windows non trova i font di sistema.
       - name: Verifica che l'exe si avvii e disegni tutte le schede
         shell: pwsh
-        env:
-          QT_QPA_PLATFORM: offscreen
         run: |
           $shots = Join-Path $env:RUNNER_TEMP "screenshots"
           $files = Get-ChildItem examples\*.csv | ForEach-Object { '"' + $_.FullName + '"' }
