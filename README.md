@@ -65,9 +65,10 @@ In alternativa, ogni push sul branch principale e ogni pull request compilano au
 2. In fondo alla pagina scarica l'artifact **NT8BacktestAnalyzer-windows** (zip).
 3. Estrai lo zip e fai doppio clic su `NT8BacktestAnalyzer.exe`.
 
-Per pubblicare una nuova release: *Actions → Build Windows → Run workflow* indicando il tag (es. `v1.0.1`)
-nel campo *release_tag*, oppure crea e invia un tag `v*`. Le note della release vengono da
-`docs/release-notes/<tag>.md`.
+Le release si pubblicano da sole: quando sul branch principale arriva una versione nuova
+(`__version__` in `nt8analyzer/__init__.py`, es. `1.0.1`), il workflow crea la release `v1.0.1` con l'exe
+e i file di esempio. In alternativa: *Actions → Build Windows → Run workflow* con il campo *release_tag*,
+oppure invia un tag `v*`. Le note della release vengono da `docs/release-notes/<tag>.md`.
 
 Windows SmartScreen può mostrare un avviso perché l'exe non è firmato: *Ulteriori informazioni → Esegui comunque*.
 

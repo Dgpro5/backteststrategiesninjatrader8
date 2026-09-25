@@ -72,23 +72,54 @@ jobs:
           name: screenshots-windows
           path: ${{ runner.temp }}/screenshots
 
-      # Release: con un tag v* oppure avviando il workflow a mano con "release_tag".
+      # Release:
+      # - push sul branch principale: automatica se la versione in nt8analyzer/__init__.py non ha ancora una release;
+      # - tag v* inviato al repository;
+      # - "Run workflow" a mano indicando "release_tag".
+      # Nelle pull request lo stesso controllo gira senza pubblicare (mostra cosa succederà dopo il merge).
       - name: Prepara la release
         id: release
-        if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.release_tag != '')
         shell: pwsh
         env:
-          TAG: ${{ inputs.release_tag || github.ref_name }}
+          GH_TOKEN: ${{ github.token }}
+          INPUT_TAG: ${{ inputs.release_tag }}
         run: |
-          if ($env:TAG -notmatch '^v\d+\.\d+\.\d+') { throw "Tag non valido: $env:TAG (atteso vX.Y.Z)" }
+          $PSNativeCommandUseErrorActionPreference = $false  # "gh release view" esce con 1 se la release non esiste
+          $tag = ""
+          if ($env:GITHUB_REF -like "refs/tags/v*") {
+            $tag = $env:GITHUB_REF_NAME
+          } elseif ($env:INPUT_TAG) {
+            $tag = $env:INPUT_TAG
+          } elseif ($env:GITHUB_EVENT_NAME -in @("push", "pull_request")) {
+            $version = (Select-String -Path nt8analyzer\__init__.py -Pattern '__version__\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
+            $tag = "v$version"
+            gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null
+            if ($LASTEXITCODE -eq 0) {
+              Write-Host "La release $tag esiste gia': niente da pubblicare"
+              $tag = ""
+            }
+          }
+          if (-not $tag) {
+            "publish=false" >> $env:GITHUB_OUTPUT
+            exit 0
+          }
+          if ($tag -notmatch '^v\d+\.\d+\.\d+') { throw "Tag non valido: $tag (atteso vX.Y.Z)" }
           Compress-Archive -Path examples\*.csv -DestinationPath dist\esempi-csv.zip -Force
-          $notes = "docs/release-notes/$env:TAG.md"
+          $notes = "docs/release-notes/$tag.md"
           if (Test-Path $notes) { Copy-Item $notes release-notes.md }
-          else { Set-Content release-notes.md "NT8 Backtest Analyzer $env:TAG per Windows: scarica NT8BacktestAnalyzer.exe e avvialo con un doppio clic." }
-          "tag=$env:TAG" >> $env:GITHUB_OUTPUT
+          else { Set-Content release-notes.md "NT8 Backtest Analyzer $tag per Windows: scarica NT8BacktestAnalyzer.exe e avvialo con un doppio clic." }
+          if ($env:GITHUB_EVENT_NAME -eq "pull_request") {
+            Write-Host "Pull request: dopo il merge sul branch principale verra' pubblicata la release $tag"
+            "publish=false" >> $env:GITHUB_OUTPUT
+            exit 0
+          }
+          Write-Host "Pubblico la release $tag"
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+          "publish=true" >> $env:GITHUB_OUTPUT
+          exit 0
 
       - name: Pubblica la release
-        if: steps.release.outcome == 'success'
+        if: steps.release.outputs.publish == 'true'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.release.outputs.tag }}
