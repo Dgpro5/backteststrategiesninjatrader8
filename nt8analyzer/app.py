@@ -13,7 +13,8 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument(
         "--screenshots",
         metavar="CARTELLA",
-        help="Salva uno screenshot di ogni scheda nella cartella indicata ed esce (verifica automatica)",
+        help="Salva uno screenshot di ogni scheda e il relativo report di stampa (PDF) nella cartella "
+        "indicata, poi esce (verifica automatica)",
     )
     parser.add_argument(
         "--tema",
@@ -62,20 +63,33 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _take_screenshots(app, window, folder: str) -> int:
-    """Modalità di verifica: renderizza ogni scheda e salva un PNG, poi esce."""
+    """Modalità di verifica: salva un PNG di ogni scheda e, in ``stampa/``, il report PDF
+    di ogni scheda con l'anteprima della prima pagina, poi esce."""
+    from .ui.print_templates import build_report
+    from .ui.report import export_pdf, render_images
+
     os.makedirs(folder, exist_ok=True)
     if window.portfolio is None or window.portfolio.empty:
         print("Nessun dato caricato", file=sys.stderr)
         return 2
+    reports = os.path.join(folder, "stampa")
+    os.makedirs(reports, exist_ok=True)
     ok = True
     for i in range(window.tabs.count()):
         window.tabs.setCurrentIndex(i)
         for _ in range(5):
             app.processEvents()
-        name = window.tabs.tabText(i).lower().replace(" ", "_")
-        path = os.path.join(folder, f"{i + 1:02d}_{name}.png")
+        name = f"{i + 1:02d}_{window.tabs.tabText(i).lower().replace(' ', '_')}"
+        path = os.path.join(folder, f"{name}.png")
         ok &= window.grab().save(path)
         print(f"salvato {path}")
+        content = build_report(window, i)
+        pdf = os.path.join(reports, f"{name}.pdf")
+        pages = export_pdf(content, pdf) if content is not None else 0
+        ok &= pages > 0 and os.path.exists(pdf)
+        first = render_images(content, max_pages=1) if pages else []
+        ok &= bool(first) and first[0].save(os.path.join(reports, f"{name}_pagina1.png"))
+        print(f"salvato {pdf} ({pages} pagine)")
     return 0 if ok else 1
 
 

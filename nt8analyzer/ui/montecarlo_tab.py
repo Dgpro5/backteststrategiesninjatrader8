@@ -53,6 +53,46 @@ HIST_METRICS = [
 ]
 
 
+KPI_LABELS = [
+    "Max DD · peggiore",
+    "Max DD · medio",
+    "Max DD · migliore",
+    "Max DD · conf. 95%",
+    "Perdita consec. · peggiore",
+    "Prob. DD ≥ soglia",
+    "Prob. profitto < 0",
+]
+
+
+def kpi_values(result: MCResult, threshold: float) -> list[tuple[str, str, int, str]]:
+    """(etichetta, valore, tono, sottotitolo) dei riquadri in alto, usati anche nella stampa."""
+    rows = {s.key: s for s in result.summary}
+    dd, dd_pct = rows["max_dd"], rows.get("max_dd_pct")
+
+    def pct_sub(attr: str) -> str:
+        return f"{theme.fmt_pct(getattr(dd_pct, attr))} dal picco" if dd_pct else ""
+
+    streak, losses = rows["max_consec_loss_amount"], rows["max_consec_losses"]
+    prob = result.prob_dd_exceeds(threshold)
+    loss_prob = result.prob_loss()
+    values = [
+        (theme.fmt_money(-dd.worst), -1, pct_sub("worst")),
+        (theme.fmt_money(-dd.mean), -1, pct_sub("mean")),
+        (theme.fmt_money(-dd.best), -1 if dd.best else 0, pct_sub("best")),
+        (theme.fmt_money(-dd.conf95), -1, f"99%: {theme.fmt_money(-dd.conf99)}"),
+        (
+            theme.fmt_money(streak.worst),
+            -1 if streak.worst < 0 else 0,
+            f"{int(losses.worst)} perdite di fila (media {losses.mean:.1f})",
+        ),
+        ("—", 0, "imposta una soglia")
+        if prob is None
+        else (theme.fmt_pct(prob, 1), -1 if prob > 0 else 0, f"soglia {theme.fmt_money(threshold, 0)}"),
+        (theme.fmt_pct(loss_prob, 1), -1 if loss_prob > 0 else 0, f"{result.n_sims:,} simulazioni"),
+    ]
+    return [(label, *v) for label, v in zip(KPI_LABELS, values)]
+
+
 class MonteCarloTab(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -143,13 +183,15 @@ class MonteCarloTab(QWidget):
         # --- KPI
         kpi_row = QHBoxLayout()
         kpi_row.setSpacing(8)
-        self.kpi_worst = KpiTile("Max DD · peggiore")
-        self.kpi_mean = KpiTile("Max DD · medio")
-        self.kpi_best = KpiTile("Max DD · migliore")
-        self.kpi_95 = KpiTile("Max DD · conf. 95%")
-        self.kpi_streak = KpiTile("Perdita consec. · peggiore")
-        self.kpi_prob = KpiTile("Prob. DD ≥ soglia")
-        self.kpi_loss = KpiTile("Prob. profitto < 0")
+        (
+            self.kpi_worst,
+            self.kpi_mean,
+            self.kpi_best,
+            self.kpi_95,
+            self.kpi_streak,
+            self.kpi_prob,
+            self.kpi_loss,
+        ) = (KpiTile(label) for label in KPI_LABELS)
         for tile in (self.kpi_worst, self.kpi_mean, self.kpi_best, self.kpi_95, self.kpi_streak, self.kpi_prob, self.kpi_loss):
             kpi_row.addWidget(tile)
         layout.addLayout(kpi_row)
@@ -416,34 +458,11 @@ class MonteCarloTab(QWidget):
         return next((s for s in self.result.summary if s.key == key), None)
 
     def _update_kpis(self) -> None:
-        r = self.result
-        if r is None:
+        if self.result is None:
             return
-        dd = self._row("max_dd")
-        dd_pct = self._row("max_dd_pct")
-
-        def pct_sub(attr: str) -> str:
-            return f"{theme.fmt_pct(getattr(dd_pct, attr))} dal picco" if dd_pct else ""
-
-        self.kpi_worst.set(theme.fmt_money(-dd.worst), -1, pct_sub("worst"))
-        self.kpi_mean.set(theme.fmt_money(-dd.mean), -1, pct_sub("mean"))
-        self.kpi_best.set(theme.fmt_money(-dd.best), -1 if dd.best else 0, pct_sub("best"))
-        self.kpi_95.set(theme.fmt_money(-dd.conf95), -1, f"99%: {theme.fmt_money(-dd.conf99)}")
-        streak = self._row("max_consec_loss_amount")
-        losses = self._row("max_consec_losses")
-        self.kpi_streak.set(
-            theme.fmt_money(streak.worst),
-            -1 if streak.worst < 0 else 0,
-            f"{int(losses.worst)} perdite di fila (media {losses.mean:.1f})",
-        )
-        threshold = self.threshold.value()
-        prob = r.prob_dd_exceeds(threshold)
-        if prob is None:
-            self.kpi_prob.set("—", sub="imposta una soglia")
-        else:
-            self.kpi_prob.set(theme.fmt_pct(prob, 1), -1 if prob > 0 else 0, f"soglia {theme.fmt_money(threshold, 0)}")
-        loss_prob = r.prob_loss()
-        self.kpi_loss.set(theme.fmt_pct(loss_prob, 1), -1 if loss_prob > 0 else 0, f"{r.n_sims:,} simulazioni")
+        tiles = (self.kpi_worst, self.kpi_mean, self.kpi_best, self.kpi_95, self.kpi_streak, self.kpi_prob, self.kpi_loss)
+        for tile, (_label, value, tone, sub) in zip(tiles, kpi_values(self.result, self.threshold.value())):
+            tile.set(value, tone, sub)
         self._draw_histogram()
 
     def _draw_histogram(self) -> None:

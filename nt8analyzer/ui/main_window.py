@@ -6,6 +6,7 @@ import os
 
 from PySide6.QtCore import QSettings, Qt, QTimer
 from PySide6.QtGui import QAction, QActionGroup, QKeySequence
+from PySide6.QtPrintSupport import QPrintPreviewDialog
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -34,11 +35,13 @@ from ..parser import ParseError, parse_file
 from ..portfolio import Portfolio
 from . import theme
 from .analysis_tab import AnalysisTab
-from .widgets import restyle_all
 from .equity_tab import EquityTab
 from .montecarlo_tab import MonteCarloTab
+from .print_templates import build_report, report_filename
+from .report import ReportContent, export_pdf, make_printer, print_to
 from .stats_tab import StatsTab
 from .trades_tab import TradesTab
+from .widgets import restyle_all
 
 
 def _scrollable(widget: QWidget) -> QScrollArea:
@@ -89,6 +92,7 @@ class MainWindow(QMainWindow):
             (self.trades_tab, "Lista trade"),
         ):
             self.tabs.addTab(_scrollable(widget), title)
+        self.tabs.setCornerWidget(self._build_print_buttons(), Qt.TopRightCorner)
         self.stack.addWidget(self.tabs)
         splitter.addWidget(self.stack)
         splitter.setStretchFactor(0, 0)
@@ -112,6 +116,16 @@ class MainWindow(QMainWindow):
         clear_action = QAction("Rimuovi tutti", self)
         clear_action.triggered.connect(self.clear_all)
         file_menu.addAction(clear_action)
+        file_menu.addSeparator()
+        print_action = QAction("Stampa pagina corrente…", self)
+        print_action.setShortcut(QKeySequence.Print)
+        print_action.setToolTip("Anteprima e stampa della scheda visibile")
+        print_action.triggered.connect(self.print_current)
+        file_menu.addAction(print_action)
+        pdf_action = QAction("Esporta pagina corrente in PDF…", self)
+        pdf_action.setShortcut(QKeySequence("Ctrl+Shift+P"))
+        pdf_action.triggered.connect(self.export_current_pdf)
+        file_menu.addAction(pdf_action)
         file_menu.addSeparator()
         quit_action = QAction("Esci", self)
         quit_action.setShortcut(QKeySequence.Quit)
@@ -138,6 +152,21 @@ class MainWindow(QMainWindow):
         about = QAction("Informazioni", self)
         about.triggered.connect(self._about)
         help_menu.addAction(about)
+
+    def _build_print_buttons(self) -> QWidget:
+        box = QWidget()
+        row = QHBoxLayout(box)
+        row.setContentsMargins(0, 0, 4, 2)
+        row.setSpacing(6)
+        print_btn = QPushButton("Stampa…")
+        print_btn.setToolTip("Anteprima e stampa della scheda visibile (Ctrl+P)")
+        print_btn.clicked.connect(self.print_current)
+        pdf_btn = QPushButton("PDF…")
+        pdf_btn.setToolTip("Salva la scheda visibile come PDF (Ctrl+Maiusc+P)")
+        pdf_btn.clicked.connect(self.export_current_pdf)
+        row.addWidget(print_btn)
+        row.addWidget(pdf_btn)
+        return box
 
     def _build_sidebar(self) -> QWidget:
         side = QWidget()
@@ -398,6 +427,52 @@ class MainWindow(QMainWindow):
             QApplication.restoreOverrideCursor()
         self.mc_tab.update_portfolio(self.portfolio)
 
+    # ------------------------------------------------------------------ stampa
+    def current_report(self) -> ReportContent | None:
+        """Report della scheda visibile, pronto per stampante o PDF."""
+        if self.portfolio is None or self.portfolio.empty:
+            QMessageBox.information(self, "Stampa", "Carica almeno un file CSV prima di stampare.")
+            return None
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            return build_report(self)
+        finally:
+            QApplication.restoreOverrideCursor()
+
+    def print_current(self) -> None:
+        content = self.current_report()
+        if content is None:
+            return
+        printer = make_printer(content.title)
+        preview = QPrintPreviewDialog(printer, self)
+        preview.setWindowTitle(f"Anteprima di stampa · {content.title}")
+        preview.paintRequested.connect(lambda target: print_to(content, target))
+        preview.resize(1200, 860)
+        preview.exec()
+
+    def export_current_pdf(self) -> None:
+        content = self.current_report()
+        if content is None:
+            return
+        folder = str(self.settings.value("pdf_dir", self.settings.value("last_dir", os.path.expanduser("~"))))
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Esporta in PDF", os.path.join(folder, report_filename(content)), "PDF (*.pdf)"
+        )
+        if not path:
+            return
+        if not path.lower().endswith(".pdf"):
+            path += ".pdf"
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            pages = export_pdf(content, path)
+        finally:
+            QApplication.restoreOverrideCursor()
+        if not pages or not os.path.exists(path):
+            QMessageBox.warning(self, "Esporta in PDF", f"Impossibile salvare il file:\n{path}")
+            return
+        self.settings.setValue("pdf_dir", os.path.dirname(path))
+        self.statusBar().showMessage(f"PDF salvato ({pages} pagine): {path}", 10000)
+
     # ------------------------------------------------------------------ tema
     def set_theme_preference(self, preference: str, persist: bool = True) -> None:
         """Cambia il tema dell'interfaccia: "light", "dark" o "system"."""
@@ -459,5 +534,6 @@ class MainWindow(QMainWindow):
             APP_NAME,
             f"<b>{APP_NAME} {__version__}</b><br><br>"
             "Analisi di export trade di NinjaTrader 8: statistiche, equity curve per strategia e combinate, "
-            "drawdown e simulazione Monte Carlo (shuffle / bootstrap).",
+            "drawdown e simulazione Monte Carlo (shuffle / bootstrap).<br><br>"
+            "Ctrl+P stampa la scheda visibile, Ctrl+Maiusc+P la salva in PDF, Ctrl+T alterna il tema.",
         )

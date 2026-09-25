@@ -6,6 +6,11 @@ on:
     tags: ["v*"]
   pull_request:
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Tag della release da pubblicare (es. v1.0.0). Vuoto = solo build e verifica"
+        required: false
+        default: ""
 
 permissions:
   contents: write
@@ -36,7 +41,7 @@ jobs:
         run: python -m PyInstaller --noconfirm --clean NT8BacktestAnalyzer.spec
 
       # Plugin grafico nativo di Windows: con "offscreen" Qt su Windows non trova i font di sistema.
-      - name: Verifica che l'exe si avvii e disegni tutte le schede (tema chiaro e scuro)
+      - name: Verifica che l'exe si avvii, disegni tutte le schede e crei i PDF di stampa (tema chiaro e scuro)
         shell: pwsh
         run: |
           $files = Get-ChildItem examples\*.csv | ForEach-Object { '"' + $_.FullName + '"' }
@@ -47,7 +52,9 @@ jobs:
             if ($p.ExitCode -ne 0) { throw "L'exe (tema $tema) e' terminato con codice $($p.ExitCode)" }
             $png = Get-ChildItem $shots -Filter *.png
             if ($png.Count -ne 5) { throw "Tema ${tema}: attesi 5 screenshot, trovati $($png.Count)" }
-            $png | Format-Table Name, Length
+            $pdf = Get-ChildItem (Join-Path $shots "stampa") -Filter *.pdf
+            if ($pdf.Count -ne 5) { throw "Tema ${tema}: attesi 5 PDF di stampa, trovati $($pdf.Count)" }
+            $png + $pdf | Format-Table Name, Length
           }
           Get-Item dist\NT8BacktestAnalyzer.exe | Format-Table Name, Length
 
@@ -65,8 +72,30 @@ jobs:
           name: screenshots-windows
           path: ${{ runner.temp }}/screenshots
 
-      - name: Pubblica la release (solo per i tag v*)
-        if: startsWith(github.ref, 'refs/tags/v')
+      # Release: con un tag v* oppure avviando il workflow a mano con "release_tag".
+      - name: Prepara la release
+        id: release
+        if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.release_tag != '')
+        shell: pwsh
+        env:
+          TAG: ${{ inputs.release_tag || github.ref_name }}
+        run: |
+          if ($env:TAG -notmatch '^v\d+\.\d+\.\d+') { throw "Tag non valido: $env:TAG (atteso vX.Y.Z)" }
+          Compress-Archive -Path examples\*.csv -DestinationPath dist\esempi-csv.zip -Force
+          $notes = "docs/release-notes/$env:TAG.md"
+          if (Test-Path $notes) { Copy-Item $notes release-notes.md }
+          else { Set-Content release-notes.md "NT8 Backtest Analyzer $env:TAG per Windows: scarica NT8BacktestAnalyzer.exe e avvialo con un doppio clic." }
+          "tag=$env:TAG" >> $env:GITHUB_OUTPUT
+
+      - name: Pubblica la release
+        if: steps.release.outcome == 'success'
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/NT8BacktestAnalyzer.exe
+          tag_name: ${{ steps.release.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          name: NT8 Backtest Analyzer ${{ steps.release.outputs.tag }}
+          body_path: release-notes.md
+          make_latest: true
+          files: |
+            dist/NT8BacktestAnalyzer.exe
+            dist/esempi-csv.zip

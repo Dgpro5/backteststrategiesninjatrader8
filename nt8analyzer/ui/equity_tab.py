@@ -174,7 +174,7 @@ class EquityTab(QWidget):
         who = "combinato" if primary.is_combined else primary.name
         label = pg.TextItem(
             html=(
-                f"<div style='font-size:9pt'><b>Max DD {who}</b><br>"
+                f"<div style='font-size:9pt; color:{theme.INK}'><b>Max DD {who}</b><br>"
                 f"{span(theme.NEGATIVE_TEXT, theme.fmt_money(-info.max_dd), True)}</div>"
             ),
             anchor=(0.5, -0.15),
@@ -238,19 +238,7 @@ class EquityTab(QWidget):
             name.setCheckState(Qt.Checked if s.visible else Qt.Unchecked)
             name.setIcon(theme.swatch_icon(s.color, s.style))
             name.setData(Qt.UserRole, r)
-            values = [
-                ("int", st["n_trades"]),
-                ("money", st["net_profit"]),
-                ("money", -st["max_dd"] if st["max_dd"] else 0.0),
-                ("pct", st["max_dd_pct"]),
-                ("datetime", st["max_dd_start"]),
-                ("datetime", st["max_dd_trough"]),
-                ("num1", st["max_dd_days"]),
-                ("ratio", st["recovery_factor"]),
-                ("ratio", st["profit_factor"]),
-                ("money_date", st["worst_day"]),
-                ("int", st["max_consec_losses"]),
-            ]
+            values = summary_values(st)
             self.table.setItem(r, 0, name)
             for c, (kind, value) in enumerate(values, start=1):
                 item = QTableWidgetItem(theme.fmt_value(kind, value))
@@ -336,6 +324,27 @@ class EquityTab(QWidget):
         if not rows:
             return None
         return f"<b>{self._date_header(x)}</b><br>" + "<br>".join(rows), x
+
+
+def summary_values(st: dict) -> list[tuple[str, object]]:
+    """(tipo, valore) delle colonne della tabella "Max drawdown e risultati" dopo "Serie"."""
+    return [
+        ("int", st["n_trades"]),
+        ("money", st["net_profit"]),
+        ("money", -st["max_dd"] if st["max_dd"] else 0.0),
+        ("pct", st["max_dd_pct"]),
+        ("datetime", st["max_dd_start"]),
+        ("datetime", st["max_dd_trough"]),
+        ("num1", st["max_dd_days"]),
+        ("ratio", st["recovery_factor"]),
+        ("ratio", st["profit_factor"]),
+        ("money_date", st["worst_day"]),
+        ("int", st["max_consec_losses"]),
+    ]
+
+
+def diverging_color(value: float) -> QColor:
+    return _diverging(value)
 
 
 def _diverging(value: float) -> QColor:
