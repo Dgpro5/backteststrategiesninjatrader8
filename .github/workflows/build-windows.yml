@@ -1,0 +1,72 @@
+name: Build Windows
+
+on:
+  push:
+    branches: [main, master]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows-exe:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Installa dipendenze
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-dev.txt
+
+      - name: Test
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -m pytest -q
+
+      - name: Crea NT8BacktestAnalyzer.exe
+        run: python -m PyInstaller --noconfirm --clean NT8BacktestAnalyzer.spec
+
+      # Plugin grafico nativo di Windows: con "offscreen" Qt su Windows non trova i font di sistema.
+      - name: Verifica che l'exe si avvii e disegni tutte le schede (tema chiaro e scuro)
+        shell: pwsh
+        run: |
+          $files = Get-ChildItem examples\*.csv | ForEach-Object { '"' + $_.FullName + '"' }
+          foreach ($tema in @("chiaro", "scuro")) {
+            $shots = Join-Path $env:RUNNER_TEMP "screenshots\$tema"
+            $argList = @("--tema", $tema, "--screenshots", ('"' + $shots + '"')) + $files
+            $p = Start-Process -FilePath "dist\NT8BacktestAnalyzer.exe" -ArgumentList $argList -Wait -PassThru
+            if ($p.ExitCode -ne 0) { throw "L'exe (tema $tema) e' terminato con codice $($p.ExitCode)" }
+            $png = Get-ChildItem $shots -Filter *.png
+            if ($png.Count -ne 5) { throw "Tema ${tema}: attesi 5 screenshot, trovati $($png.Count)" }
+            $png | Format-Table Name, Length
+          }
+          Get-Item dist\NT8BacktestAnalyzer.exe | Format-Table Name, Length
+
+      - name: Carica l'exe come artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: NT8BacktestAnalyzer-windows
+          path: |
+            dist/NT8BacktestAnalyzer.exe
+            examples/*.csv
+
+      - name: Carica gli screenshot di verifica
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots-windows
+          path: ${{ runner.temp }}/screenshots
+
+      - name: Pubblica la release (solo per i tag v*)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/NT8BacktestAnalyzer.exe
