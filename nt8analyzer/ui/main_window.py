@@ -5,10 +5,11 @@ from __future__ import annotations
 import os
 
 from PySide6.QtCore import QSettings, Qt, QTimer
-from PySide6.QtGui import QAction, QKeySequence
+from PySide6.QtGui import QAction, QActionGroup, QKeySequence
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
+    QComboBox,
     QDoubleSpinBox,
     QFileDialog,
     QFrame,
@@ -33,6 +34,7 @@ from ..parser import ParseError, parse_file
 from ..portfolio import Portfolio
 from . import theme
 from .analysis_tab import AnalysisTab
+from .widgets import restyle_all
 from .equity_tab import EquityTab
 from .montecarlo_tab import MonteCarloTab
 from .stats_tab import StatsTab
@@ -50,12 +52,15 @@ def _scrollable(widget: QWidget) -> QScrollArea:
 
 
 class MainWindow(QMainWindow):
-    def __init__(self):
+    def __init__(self, theme_preference: str = "system", persist_theme: bool = True):
+        """``theme_preference``: "light", "dark" o "system" (già applicata da chi crea la finestra)."""
         super().__init__()
         self.setWindowTitle(f"{APP_NAME} {__version__}")
         self.resize(1480, 940)
         self.setAcceptDrops(True)
         self.settings = QSettings()
+        self._theme_pref = theme_preference if theme_preference in theme.MODE_LABELS else "system"
+        self._persist_theme = persist_theme
         self.strategies: list[LoadedStrategy] = []
         self.portfolio: Portfolio | None = None
         self._next_uid = 1
@@ -91,6 +96,11 @@ class MainWindow(QMainWindow):
         splitter.setSizes([270, 1210])
         self.setCentralWidget(splitter)
         self.statusBar().showMessage("Pronto. Carica uno o più file CSV esportati da NinjaTrader 8.")
+        self._sync_theme_controls()
+        try:  # segue il tema di Windows se la preferenza è "Come il sistema" (Qt >= 6.5)
+            QApplication.styleHints().colorSchemeChanged.connect(self._system_scheme_changed)
+        except AttributeError:
+            pass
 
     # ------------------------------------------------------------------ costruzione UI
     def _build_menu(self) -> None:
@@ -107,6 +117,23 @@ class MainWindow(QMainWindow):
         quit_action.setShortcut(QKeySequence.Quit)
         quit_action.triggered.connect(self.close)
         file_menu.addAction(quit_action)
+
+        view_menu = self.menuBar().addMenu("&Visualizza")
+        theme_menu = view_menu.addMenu("Tema")
+        self._theme_actions: dict[str, QAction] = {}
+        group = QActionGroup(self)
+        group.setExclusive(True)
+        for key, label in theme.MODE_LABELS.items():
+            action = QAction(label, self, checkable=True)
+            action.triggered.connect(lambda checked=False, k=key: self.set_theme_preference(k))
+            group.addAction(action)
+            theme_menu.addAction(action)
+            self._theme_actions[key] = action
+        toggle = QAction("Alterna chiaro / scuro", self)
+        toggle.setShortcut(QKeySequence("Ctrl+T"))
+        toggle.triggered.connect(lambda: self.set_theme_preference("light" if theme.is_dark() else "dark"))
+        view_menu.addAction(toggle)
+
         help_menu = self.menuBar().addMenu("&Aiuto")
         about = QAction("Informazioni", self)
         about.triggered.connect(self._about)
@@ -151,8 +178,8 @@ class MainWindow(QMainWindow):
         layout.addLayout(row)
 
         line = QFrame()
-        line.setFrameShape(QFrame.HLine)
-        line.setStyleSheet(f"color: {theme.BORDER};")
+        line.setObjectName("separator")
+        line.setFixedHeight(1)
         layout.addWidget(line)
 
         cap_label = QLabel("Capitale iniziale")
@@ -173,6 +200,25 @@ class MainWindow(QMainWindow):
         cap_hint.setObjectName("hint")
         cap_hint.setWordWrap(True)
         layout.addWidget(cap_hint)
+
+        line2 = QFrame()
+        line2.setObjectName("separator")
+        line2.setFixedHeight(1)
+        layout.addWidget(line2)
+
+        theme_row = QHBoxLayout()
+        theme_label = QLabel("Tema")
+        theme_label.setObjectName("sectionTitle")
+        theme_row.addWidget(theme_label)
+        self.theme_box = QComboBox()
+        for key, label in theme.MODE_LABELS.items():
+            self.theme_box.addItem(label, key)
+        self.theme_box.setToolTip("Colori dell'interfaccia: chiaro, scuro o come Windows (Ctrl+T per alternare)")
+        self.theme_box.currentIndexChanged.connect(
+            lambda: self.set_theme_preference(self.theme_box.currentData())
+        )
+        theme_row.addWidget(self.theme_box, 1)
+        layout.addLayout(theme_row)
         return side
 
     def _build_empty_page(self) -> QWidget:
@@ -351,6 +397,45 @@ class MainWindow(QMainWindow):
         finally:
             QApplication.restoreOverrideCursor()
         self.mc_tab.update_portfolio(self.portfolio)
+
+    # ------------------------------------------------------------------ tema
+    def set_theme_preference(self, preference: str, persist: bool = True) -> None:
+        """Cambia il tema dell'interfaccia: "light", "dark" o "system"."""
+        if preference not in theme.MODE_LABELS:
+            return
+        self._theme_pref = preference
+        if persist and self._persist_theme:
+            self.settings.setValue("theme", preference)
+        self._sync_theme_controls()
+        self._apply_theme()
+
+    def _sync_theme_controls(self) -> None:
+        self.theme_box.blockSignals(True)
+        self.theme_box.setCurrentIndex(max(0, self.theme_box.findData(self._theme_pref)))
+        self.theme_box.blockSignals(False)
+        for key, action in self._theme_actions.items():
+            action.setChecked(key == self._theme_pref)
+
+    def _system_scheme_changed(self, *_args) -> None:
+        if self._theme_pref == "system":
+            self._apply_theme()
+
+    def _apply_theme(self) -> None:
+        mode = theme.resolve_mode(self._theme_pref)
+        theme.set_mode(mode)
+        theme.apply_theme(QApplication.instance())
+        restyle_all()
+        self._rebuild_list()
+        # Ridisegna con i nuovi colori senza ricalcolare (il Monte Carlo mantiene le simulazioni).
+        if self.portfolio is not None and not self.portfolio.empty:
+            QApplication.setOverrideCursor(Qt.WaitCursor)
+            try:
+                for tab in (self.stats_tab, self.equity_tab, self.analysis_tab, self.trades_tab):
+                    tab.update_portfolio(self.portfolio)
+                self.mc_tab.redraw()
+            finally:
+                QApplication.restoreOverrideCursor()
+        self.statusBar().showMessage(f"Tema: {theme.MODE_LABELS[self._theme_pref]}", 4000)
 
     # ------------------------------------------------------------------ drag & drop
     def dragEnterEvent(self, event) -> None:

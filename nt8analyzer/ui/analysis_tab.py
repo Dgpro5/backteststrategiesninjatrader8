@@ -166,11 +166,11 @@ class AnalysisTab(QWidget):
                     symbol=["t", "t1"],
                     size=11,
                     brush=[pg.mkBrush(theme.MC_BEST), pg.mkBrush(theme.MC_WORST)],
-                    pen=pg.mkPen("#ffffff", width=1.5),
+                    pen=theme.ring_pen(1.5),
                 )
             )
         zero_line(self.dd_plot)
-        self.dd_plot.plot(x, dd.drawdown, pen=pg.mkPen(theme.NEGATIVE, width=1.6), fillLevel=0, brush=pg.mkBrush(208, 59, 59, 60))
+        self.dd_plot.plot(x, dd.drawdown, pen=pg.mkPen(theme.NEGATIVE, width=1.6), fillLevel=0, brush=pg.mkBrush(theme.rgba(theme.NEGATIVE, 60)))
         if dd.max_dd > 0:
             self.dd_plot.addItem(
                 pg.InfiniteLine(
@@ -178,7 +178,7 @@ class AnalysisTab(QWidget):
                     angle=0,
                     pen=pg.mkPen(theme.NEGATIVE, width=1, style=Qt.DashLine),
                     label=f"Max DD {theme.fmt_money(-dd.max_dd)}",
-                    labelOpts={"position": 0.12, "color": theme.NEGATIVE_TEXT, "fill": pg.mkBrush(255, 255, 255, 220)},
+                    labelOpts={"position": 0.12, "color": theme.NEGATIVE_TEXT, "fill": theme.label_brush(220)},
                 )
             )
 
@@ -208,7 +208,7 @@ class AnalysisTab(QWidget):
             angle=90,
             pen=pg.mkPen(theme.MC_MEAN, width=1.5, style=Qt.DashLine),
             label=f"media {theme.fmt_money(ts.profit.mean())}",
-            labelOpts={"position": 0.92, "color": theme.MC_MEAN, "fill": pg.mkBrush(255, 255, 255, 220)},
+            labelOpts={"position": 0.92, "color": theme.MC_MEAN, "fill": theme.label_brush(220)},
         )
         self.hist_plot.addItem(mean_line)
 
@@ -244,7 +244,7 @@ class AnalysisTab(QWidget):
             data=np.arange(n),
             brush=bar_brushes(ts.profit),
             size=7,
-            pen=pg.mkPen("#ffffff", width=0.8),
+            pen=theme.ring_pen(0.8),
             hoverable=True,
             hoverSize=11,
         )

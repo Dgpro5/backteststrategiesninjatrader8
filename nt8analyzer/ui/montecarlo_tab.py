@@ -293,6 +293,11 @@ class MonteCarloTab(QWidget):
         self._draw()
 
     # ------------------------------------------------------------------ disegno
+    def redraw(self) -> None:
+        """Ridisegna l'ultima simulazione (es. dopo un cambio di tema) senza ricalcolarla."""
+        if self.result is not None:
+            self._draw()
+
     def _draw(self) -> None:
         r = self.result
         if r is None:
@@ -315,7 +320,7 @@ class MonteCarloTab(QWidget):
                 xs,
                 ys,
                 connect=connect,
-                pen=pg.mkPen(QColor(140, 140, 140, alpha), width=1),
+                pen=pg.mkPen(QColor(*theme.MC_GRAY_RGB, alpha), width=1),
                 antialias=False,
                 skipFiniteCheck=True,
             )
@@ -463,7 +468,7 @@ class MonteCarloTab(QWidget):
             edges = np.histogram_bin_edges(values, bins=min(60, max(10, int(np.sqrt(len(values))))))
         counts, edges = np.histogram(values, bins=edges)
         bars = pg.BarGraphItem(
-            x0=edges[:-1], x1=edges[1:], height=counts, brush=pg.mkBrush(42, 120, 214, 150), pen=pg.mkPen(theme.SURFACE, width=1)
+            x0=edges[:-1], x1=edges[1:], height=counts, brush=pg.mkBrush(*theme.HIST_BAR), pen=pg.mkPen(theme.SURFACE, width=1)
         )
         plot.addItem(bars)
         self._hist_data = (counts, edges, kind)
@@ -484,7 +489,7 @@ class MonteCarloTab(QWidget):
                 angle=90,
                 pen=pg.mkPen(color, width=1.8, style=style),
                 label=label,
-                labelOpts={"position": position, "color": color, "fill": pg.mkBrush(255, 255, 255, 220)},
+                labelOpts={"position": position, "color": color, "fill": theme.label_brush(220)},
             )
             plot.addItem(line)
 
@@ -492,7 +497,7 @@ class MonteCarloTab(QWidget):
         row = self._row(key)
         if row is not None:
             vline(sign * row.mean, theme.MC_MEAN, "media", position=0.92)
-            vline(sign * row.conf95, "#b55d00", "95%", position=0.78)
+            vline(sign * row.conf95, theme.MC_CONF, "95%", position=0.78)
             vline(sign * row.worst, theme.MC_WORST, "peggiore", Qt.SolidLine, position=0.64)
             vline(sign * row.best, theme.MC_BEST, "migliore", Qt.SolidLine, position=0.5)
         if key == "max_dd" and self.threshold.value() > 0:

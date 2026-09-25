@@ -36,17 +36,19 @@ jobs:
         run: python -m PyInstaller --noconfirm --clean NT8BacktestAnalyzer.spec
 
       # Plugin grafico nativo di Windows: con "offscreen" Qt su Windows non trova i font di sistema.
-      - name: Verifica che l'exe si avvii e disegni tutte le schede
+      - name: Verifica che l'exe si avvii e disegni tutte le schede (tema chiaro e scuro)
         shell: pwsh
         run: |
-          $shots = Join-Path $env:RUNNER_TEMP "screenshots"
           $files = Get-ChildItem examples\*.csv | ForEach-Object { '"' + $_.FullName + '"' }
-          $argList = @("--screenshots", ('"' + $shots + '"')) + $files
-          $p = Start-Process -FilePath "dist\NT8BacktestAnalyzer.exe" -ArgumentList $argList -Wait -PassThru
-          if ($p.ExitCode -ne 0) { throw "L'exe e' terminato con codice $($p.ExitCode)" }
-          $png = Get-ChildItem $shots -Filter *.png
-          if ($png.Count -ne 5) { throw "Attesi 5 screenshot, trovati $($png.Count)" }
-          $png | Format-Table Name, Length
+          foreach ($tema in @("chiaro", "scuro")) {
+            $shots = Join-Path $env:RUNNER_TEMP "screenshots\$tema"
+            $argList = @("--tema", $tema, "--screenshots", ('"' + $shots + '"')) + $files
+            $p = Start-Process -FilePath "dist\NT8BacktestAnalyzer.exe" -ArgumentList $argList -Wait -PassThru
+            if ($p.ExitCode -ne 0) { throw "L'exe (tema $tema) e' terminato con codice $($p.ExitCode)" }
+            $png = Get-ChildItem $shots -Filter *.png
+            if ($png.Count -ne 5) { throw "Tema ${tema}: attesi 5 screenshot, trovati $($png.Count)" }
+            $png | Format-Table Name, Length
+          }
           Get-Item dist\NT8BacktestAnalyzer.exe | Format-Table Name, Length
 
       - name: Carica l'exe come artifact

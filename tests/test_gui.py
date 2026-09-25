@@ -87,3 +87,68 @@ def test_hover_callbacks_return_content():
     counts, edges, _ = mc._hist_data
     assert mc._hover_hist(float(edges[0] + edges[1]) / 2, 0)
     window.close()
+
+
+def test_dark_theme_switch_keeps_results(tmp_path):
+    import numpy as np
+    from PySide6.QtCore import QSettings
+    from PySide6.QtWidgets import QApplication
+
+    from nt8analyzer.ui import theme
+    from nt8analyzer.ui.main_window import MainWindow
+
+    app = QApplication.instance() or QApplication([])
+    theme.set_mode("light")
+    theme.apply_theme(app)
+    window = MainWindow(theme_preference="light")
+    try:
+        window.load_files(sorted(glob.glob(os.path.join(EXAMPLES_DIR, "*.csv"))), interactive=False)
+        mc_result = window.mc_tab.result
+        window.set_theme_preference("dark")
+        assert theme.is_dark()
+        assert QSettings().value("theme") == "dark"
+        assert window.theme_box.currentData() == "dark"
+        assert window._theme_actions["dark"].isChecked()
+        # grafici ricolorati, Monte Carlo non ricalcolato
+        assert window.equity_tab.eq_plot.backgroundBrush().color().name() == theme.DARK["SURFACE"]
+        assert window.mc_tab.result is mc_result
+        combined = next(s for s in window.equity_tab.series if s.entity.is_combined)
+        assert combined.color == theme.DARK["COMBINED"]
+        # i tooltip funzionano anche dopo il cambio di tema
+        x_mid = float(np.median(combined.x))
+        assert window.equity_tab._hover_equity(x_mid, 0)
+        assert window.mc_tab._hover(10, 0)
+        assert window.grab().save(str(tmp_path / "dark.png"))
+        window.set_theme_preference("light")
+        assert not theme.is_dark()
+        assert window.equity_tab.eq_plot.backgroundBrush().color().name() == theme.LIGHT["SURFACE"]
+    finally:
+        theme.set_mode("light")
+        theme.apply_theme(app)
+        window.close()
+
+
+def test_theme_command_line_is_not_saved(tmp_path):
+    from PySide6.QtCore import QSettings
+
+    from nt8analyzer.app import main
+    from nt8analyzer.ui import theme
+
+    settings = QSettings("NT8BacktestAnalyzer", "NT8 Backtest Analyzer")
+    settings.setValue("theme", "light")
+    try:
+        files = sorted(glob.glob(os.path.join(EXAMPLES_DIR, "*.csv")))
+        assert main(["--tema", "scuro", "--screenshots", str(tmp_path), *files]) == 0
+        assert theme.is_dark()
+        assert QSettings("NT8BacktestAnalyzer", "NT8 Backtest Analyzer").value("theme") == "light"
+    finally:
+        theme.set_mode("light")
+
+
+def test_resolve_mode():
+    from nt8analyzer.ui import theme
+
+    assert theme.resolve_mode("dark") == "dark"
+    assert theme.resolve_mode("light") == "light"
+    assert theme.resolve_mode("system") in ("light", "dark")
+    assert theme.resolve_mode("qualsiasi") in ("light", "dark")

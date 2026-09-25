@@ -11,13 +11,23 @@ statistiche complete, equity curve per strategia e combinate, drawdown e simulaz
 | Scheda | Cosa mostra |
 |---|---|
 | **Statistiche** | Oltre 50 metriche per ogni strategia e per il portafoglio combinato: profitto netto, profit factor, expectancy, % vincenti, max drawdown ($ e %), durata e date del drawdown, max perdita consecutiva, peggior giorno/mese, Sharpe, Sortino, SQN, Kelly, CAGR, MAE/MFE/ETD… Esportabili in CSV. |
-| **Equity curve** | Una curva per strategia, ognuna di un colore diverso. Con 2 o più strategie compare la curva **nera** del portafoglio combinato, con il suo **max drawdown** evidenziato (picco ▼, minimo ▲) e il grafico del drawdown sotto. Tabella con max DD di ogni strategia e del combinato, e correlazione del P&L giornaliero. |
+| **Equity curve** | Una curva per strategia, ognuna di un colore diverso. Con 2 o più strategie compare la curva **nera** (bianca nel tema scuro) del portafoglio combinato, con il suo **max drawdown** evidenziato (picco ▼, minimo ▲) e il grafico del drawdown sotto. Tabella con max DD di ogni strategia e del combinato, e correlazione del P&L giornaliero. |
 | **Monte Carlo** | Tutte le simulazioni in **grigio**, la migliore in **verde**, la peggiore in **rosso**, la media in **blu**. Per ogni metrica (max drawdown $ e %, max perdita consecutiva, perdite di fila, peggior trade, durata del drawdown, profitto, recovery factor, expectancy, profit factor, % vincenti): caso migliore, medio, mediana, confidenza 95% e 99%, caso peggiore e valore originale. Probabilità che il drawdown superi una soglia (es. limite prop firm) e istogramma delle distribuzioni. |
 | **Analisi grafica** | Per una strategia o il portafoglio: equity, drawdown, P&L per trade, distribuzione, P&L mensile, per ora di entrata, per giorno della settimana, per tipo di uscita, MAE vs risultato e tabella mensile per anno. |
 | **Lista trade** | Tutti i trade nell'ordine cronologico combinato, con cumulativo e drawdown. |
 
 Tutti i grafici: rotella per lo zoom, trascina per spostare, passa il mouse per i valori,
 tasto destro → *Export* per salvare l'immagine.
+
+### Tema chiaro e scuro
+
+Dalla tendina **Tema** in basso nella barra laterale (o dal menu *Visualizza → Tema*) scegli
+**Chiaro**, **Scuro** o **Come il sistema** (segue l'impostazione di Windows). **Ctrl+T** alterna
+chiaro e scuro. La scelta viene ricordata; cambiare tema non ricalcola il Monte Carlo.
+Nel tema scuro la curva del portafoglio combinato è **bianca** (il nero non si vedrebbe sullo sfondo scuro)
+e le altre strategie usano la stessa palette, con tonalità adatte allo sfondo scuro.
+
+![Tema scuro](docs/img/monte_carlo_scuro.png)
 
 ## Scaricare e avviare su Windows
 
@@ -75,7 +85,7 @@ L'export standard di NinjaTrader 8 (come quello in `examples/`): separatore `,` 
 
 ```
 pip install -r requirements-dev.txt
-python main.py examples/*.csv         # avvio
+python main.py examples/*.csv         # avvio (--tema chiaro|scuro|sistema per forzare il tema)
 python -m pytest -q                   # test (anche dell'interfaccia, in modalità offscreen)
 python -m PyInstaller --noconfirm --clean NT8BacktestAnalyzer.spec   # eseguibile
 ```
@@ -95,4 +105,5 @@ tests/                       test pytest
 ```
 
 ![Equity curve](docs/img/equity_curve.png)
+![Equity curve, tema scuro](docs/img/equity_curve_scuro.png)
 ![Statistiche](docs/img/statistiche.png)

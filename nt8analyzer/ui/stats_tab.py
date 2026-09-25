@@ -122,7 +122,7 @@ class StatsTab(QWidget):
 
         section_font = QFont(self.table.font())
         section_font.setBold(True)
-        section_brush = QBrush(QColor("#ecebe6"))
+        section_brush = QBrush(QColor(theme.SECTION_BG))
         for r, definition in enumerate(STAT_DEFS):
             if definition[0] == "section":
                 item = QTableWidgetItem(definition[1])

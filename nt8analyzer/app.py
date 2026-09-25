@@ -15,6 +15,11 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         metavar="CARTELLA",
         help="Salva uno screenshot di ogni scheda nella cartella indicata ed esce (verifica automatica)",
     )
+    parser.add_argument(
+        "--tema",
+        choices=["chiaro", "scuro", "sistema"],
+        help="Tema dell'interfaccia per questa sessione (non modifica quello salvato)",
+    )
     parser.add_argument("--size", nargs=2, type=int, default=(1600, 950), metavar=("L", "A"), help=argparse.SUPPRESS)
     return parser.parse_args(argv)
 
@@ -22,22 +27,25 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(sys.argv[1:] if argv is None else argv)
 
-    from PySide6.QtCore import QCoreApplication, QTimer
+    from PySide6.QtCore import QCoreApplication, QSettings, QTimer
     from PySide6.QtGui import QIcon
     from PySide6.QtWidgets import QApplication
 
     from . import APP_NAME
     from .ui.main_window import MainWindow
-    from .ui.theme import apply_theme
+    from .ui import theme
 
     QCoreApplication.setOrganizationName("NT8BacktestAnalyzer")
     QCoreApplication.setApplicationName(APP_NAME)
     app = QApplication.instance() or QApplication(sys.argv[:1])
-    apply_theme(app)
+    cli_theme = {"chiaro": "light", "scuro": "dark", "sistema": "system"}.get(args.tema)
+    preference = cli_theme or str(QSettings().value("theme", "system"))
+    theme.set_mode(theme.resolve_mode(preference))
+    theme.apply_theme(app)
     icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "icon.png")
     if os.path.exists(icon_path):
         app.setWindowIcon(QIcon(icon_path))
-    window = MainWindow()
+    window = MainWindow(theme_preference=preference, persist_theme=cli_theme is None)
     if args.screenshots:
         window.resize(args.size[0], args.size[1])
         window.show()

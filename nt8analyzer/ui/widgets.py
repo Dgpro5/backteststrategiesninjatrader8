@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import weakref
 from typing import Callable
 
 import numpy as np
@@ -10,6 +11,21 @@ from PySide6.QtCore import QEvent, QObject, Qt
 from PySide6.QtWidgets import QFrame, QLabel, QSizePolicy, QVBoxLayout, QWidget
 
 from . import theme
+
+# Elementi creati una volta sola che vanno ricolorati quando cambia il tema.
+_PLOTS: "weakref.WeakSet[pg.PlotWidget]" = weakref.WeakSet()
+_LEGENDS: "weakref.WeakSet[pg.LegendItem]" = weakref.WeakSet()
+_HOVERS: "weakref.WeakSet[HoverTip]" = weakref.WeakSet()
+
+
+def restyle_all() -> None:
+    """Riapplica i colori del tema corrente a grafici, legende e tooltip già creati."""
+    for widget in list(_PLOTS):
+        style_plot(widget)
+    for legend in list(_LEGENDS):
+        style_legend(legend)
+    for hover in list(_HOVERS):
+        hover.restyle()
 
 
 class MoneyAxis(pg.AxisItem):
@@ -59,32 +75,42 @@ def make_plot(
     elif money_y:
         axes["left"] = MoneyAxis("left")
     widget = pg.PlotWidget(axisItems=axes)
+    widget.getPlotItem().showGrid(x=True, y=True, alpha=0.12)
+    widget._nt8_title = title
+    widget._nt8_labels = {"bottom": x_label, "left": y_label}
+    style_plot(widget)
+    widget.setMinimumHeight(min_height)
+    widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+    _PLOTS.add(widget)
+    return widget
+
+
+def style_plot(widget: pg.PlotWidget) -> None:
     item = widget.getPlotItem()
-    item.showGrid(x=True, y=True, alpha=0.12)
+    widget.setBackground(theme.SURFACE)
+    title = getattr(widget, "_nt8_title", None)
     if title:
         item.setTitle(title, color=theme.INK, size="10.5pt", bold=True)
     for name in ("left", "bottom"):
         axis = item.getAxis(name)
         axis.setPen(pg.mkPen(theme.BORDER))
         axis.setTextPen(pg.mkPen(theme.INK_2))
-    if x_label:
-        item.setLabel("bottom", x_label, color=theme.INK_2)
-    if y_label:
-        item.setLabel("left", y_label, color=theme.INK_2)
-    widget.setMinimumHeight(min_height)
-    widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-    return widget
+    for name, text in getattr(widget, "_nt8_labels", {}).items():
+        if text:
+            item.setLabel(name, text, color=theme.INK_2)
 
 
 def add_legend(widget: pg.PlotWidget, columns: int = 1) -> pg.LegendItem:
-    legend = widget.getPlotItem().addLegend(
-        offset=(10, 10),
-        brush=pg.mkBrush(255, 255, 255, 225),
-        pen=pg.mkPen(theme.BORDER),
-        labelTextColor=theme.INK,
-        colCount=columns,
-    )
+    legend = widget.getPlotItem().addLegend(offset=(10, 10), colCount=columns)
+    style_legend(legend)
+    _LEGENDS.add(legend)
     return legend
+
+
+def style_legend(legend: pg.LegendItem) -> None:
+    legend.setBrush(theme.label_brush())
+    legend.setPen(pg.mkPen(theme.BORDER))
+    legend.setLabelTextColor(theme.INK)
 
 
 def zero_line(widget: pg.PlotWidget, y: float = 0.0) -> pg.InfiniteLine:
@@ -116,19 +142,23 @@ class HoverTip(QObject):
         self.widget = widget
         self.plot = widget.getPlotItem()
         self.callback = callback
-        self.text = pg.TextItem(
-            anchor=(0, 1),
-            fill=pg.mkBrush(255, 255, 255, 240),
-            border=pg.mkPen(theme.BORDER),
-            color=theme.INK,
-        )
+        self.text = self.vline = None
+        self.restyle()
+        self.proxy = pg.SignalProxy(self.plot.scene().sigMouseMoved, rateLimit=45, slot=self._moved)
+        widget.viewport().installEventFilter(self)
+        _HOVERS.add(self)
+
+    def restyle(self) -> None:
+        """(Ri)crea riquadro e linea con i colori del tema corrente."""
+        for old in (self.text, self.vline):
+            if old is not None and old.scene() is not None:
+                self.plot.removeItem(old)
+        self.text = pg.TextItem(anchor=(0, 1), fill=theme.label_brush(245), border=pg.mkPen(theme.BORDER), color=theme.INK)
         self.text.setZValue(1000)
         self.vline = pg.InfiniteLine(angle=90, movable=False, pen=pg.mkPen(theme.MUTED, width=1, style=Qt.DashLine))
         self.vline.setZValue(999)
         self._attach()
         self._hide()
-        self.proxy = pg.SignalProxy(self.plot.scene().sigMouseMoved, rateLimit=45, slot=self._moved)
-        widget.viewport().installEventFilter(self)
 
     def _attach(self) -> None:
         if self.text.scene() is None:

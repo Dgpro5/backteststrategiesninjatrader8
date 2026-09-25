@@ -167,7 +167,7 @@ class EquityTab(QWidget):
             symbol=["t", "t1"],
             size=12,
             brush=[pg.mkBrush(theme.MC_BEST), pg.mkBrush(theme.MC_WORST)],
-            pen=pg.mkPen("#ffffff", width=1.5),
+            pen=theme.ring_pen(1.5),
         )
         markers.setZValue(20)
         self.eq_plot.addItem(markers)
@@ -178,8 +178,9 @@ class EquityTab(QWidget):
                 f"{span(theme.NEGATIVE_TEXT, theme.fmt_money(-info.max_dd), True)}</div>"
             ),
             anchor=(0.5, -0.15),
-            fill=pg.mkBrush(255, 255, 255, 220),
+            fill=theme.label_brush(220),
             border=pg.mkPen(theme.BORDER),
+            color=theme.INK,
         )
         label.setPos(xt, yt)
         label.setZValue(21)
@@ -191,10 +192,10 @@ class EquityTab(QWidget):
             movable=False,
             pen=pg.mkPen(theme.MC_WORST, width=1.2, style=Qt.DashLine),
             label=f"Max DD {who}: {theme.fmt_money(-info.max_dd)}",
-            labelOpts={"position": 0.12, "color": theme.NEGATIVE_TEXT, "fill": pg.mkBrush(255, 255, 255, 220)},
+            labelOpts={"position": 0.12, "color": theme.NEGATIVE_TEXT, "fill": theme.label_brush(220)},
         )
         self.dd_plot.addItem(line)
-        trough = pg.ScatterPlotItem([xt], [-info.max_dd], symbol="o", size=9, brush=pg.mkBrush(theme.MC_WORST), pen=pg.mkPen("#ffffff"))
+        trough = pg.ScatterPlotItem([xt], [-info.max_dd], symbol="o", size=9, brush=pg.mkBrush(theme.MC_WORST), pen=theme.ring_pen(1.0))
         trough.setZValue(20)
         self.dd_plot.addItem(trough)
 
@@ -262,7 +263,7 @@ class EquityTab(QWidget):
                     font = item.font()
                     font.setBold(True)
                     item.setFont(font)
-                    item.setBackground(QBrush(QColor("#efeee9")))
+                    item.setBackground(QBrush(QColor(theme.HIGHLIGHT_ROW)))
         head = self.table.horizontalHeader()
         head.setSectionResizeMode(QHeaderView.ResizeToContents)
         head.setStretchLastSection(True)
@@ -340,7 +341,7 @@ class EquityTab(QWidget):
 def _diverging(value: float) -> QColor:
     """Blu per correlazione negativa, rosso per positiva, grigio neutro a 0."""
     value = max(-1.0, min(1.0, value))
-    neutral = np.array([240, 239, 236])
-    pole = np.array([224, 104, 103]) if value > 0 else np.array([109, 167, 236])
+    neutral = np.array(theme.CORR_NEUTRAL)
+    pole = np.array(theme.CORR_POSITIVE if value > 0 else theme.CORR_NEGATIVE)
     rgb = neutral + (pole - neutral) * abs(value) * 0.8
     return QColor(*[int(c) for c in rgb])
