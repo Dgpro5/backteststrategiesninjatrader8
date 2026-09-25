@@ -19,6 +19,28 @@ statistiche complete, equity curve per strategia e combinate, drawdown e simulaz
 Tutti i grafici: rotella per lo zoom, trascina per spostare, passa il mouse per i valori,
 tasto destro → *Export* per salvare l'immagine.
 
+### Stampa e PDF
+
+Ogni scheda ha il suo modello di stampa: **Stampa…** in alto a destra accanto alle schede
+(o *File → Stampa pagina corrente…*, **Ctrl+P**) apre l'anteprima e stampa la scheda che stai guardando.
+**PDF…** (*File → Esporta pagina corrente in PDF…*, **Ctrl+Maiusc+P**) la salva direttamente in PDF.
+
+Il report è un A4 orizzontale con lo stesso stile dell'app, a colori e sempre su sfondo bianco
+(anche se usi il tema scuro): intestazione con titolo e data, riepilogo (serie, periodo, trade, capitale),
+riquadri con i valori principali, grafici ad alta risoluzione e tabelle con i colori di ogni strategia.
+Le tabelle lunghe continuano sulle pagine successive e quelle troppo larghe vengono divise ripetendo
+la prima colonna; in fondo a ogni pagina c'è "Pagina X di Y".
+
+| Scheda | Contenuto della stampa |
+|---|---|
+| Statistiche | Valori principali e tabella completa per strategia e portafoglio combinato |
+| Equity curve | Equity curve (curve visibili come nell'app), drawdown, max drawdown per strategia, correlazione |
+| Monte Carlo | Parametri, caso migliore/medio/peggiore, grafico delle simulazioni, tabella e distribuzione (la simulazione non viene rifatta) |
+| Analisi grafica | Tutti i 9 grafici della serie selezionata e P&L mensile per anno |
+| Lista trade | Tutti i trade della selezione con cumulativo e drawdown |
+
+![Stampa Monte Carlo](docs/img/stampa_monte_carlo.png)
+
 ### Tema chiaro e scuro
 
 Dalla tendina **Tema** in basso nella barra laterale (o dal menu *Visualizza → Tema*) scegli
@@ -33,14 +55,20 @@ e le altre strategie usano la stessa palette, con tonalità adatte allo sfondo s
 
 ### Opzione 1: eseguibile pronto (nessuna installazione)
 
-Ogni push sul branch principale e ogni pull request compilano automaticamente `NT8BacktestAnalyzer.exe`
+Scarica `NT8BacktestAnalyzer.exe` dall'ultima **Release** del repository (pagina *Releases* a destra),
+poi fai doppio clic sul file. Nella release trovi anche `esempi-csv.zip` con i file di prova.
+
+In alternativa, ogni push sul branch principale e ogni pull request compilano automaticamente l'exe
 (workflow *Build Windows*, avviabile anche a mano da *Actions → Build Windows → Run workflow*):
 
 1. Apri la scheda **Actions** del repository → l'ultima esecuzione di **Build Windows**.
 2. In fondo alla pagina scarica l'artifact **NT8BacktestAnalyzer-windows** (zip).
 3. Estrai lo zip e fai doppio clic su `NT8BacktestAnalyzer.exe`.
 
-Se crei un tag `v1.0.0` l'exe viene allegato anche a una **Release**.
+Per pubblicare una nuova release: *Actions → Build Windows → Run workflow* indicando il tag (es. `v1.0.1`)
+nel campo *release_tag*, oppure crea e invia un tag `v*`. Le note della release vengono da
+`docs/release-notes/<tag>.md`.
+
 Windows SmartScreen può mostrare un avviso perché l'exe non è firmato: *Ulteriori informazioni → Esegui comunque*.
 
 ### Opzione 2: dal codice sorgente
@@ -86,6 +114,7 @@ L'export standard di NinjaTrader 8 (come quello in `examples/`): separatore `,` 
 ```
 pip install -r requirements-dev.txt
 python main.py examples/*.csv         # avvio (--tema chiaro|scuro|sistema per forzare il tema)
+python main.py --screenshots out examples/*.csv   # PNG di ogni scheda + report PDF in out/stampa
 python -m pytest -q                   # test (anche dell'interfaccia, in modalità offscreen)
 python -m PyInstaller --noconfirm --clean NT8BacktestAnalyzer.spec   # eseguibile
 ```
@@ -100,6 +129,8 @@ nt8analyzer/metrics.py       statistiche e drawdown
 nt8analyzer/montecarlo.py    simulazione Monte Carlo (vettoriale, numpy)
 nt8analyzer/portfolio.py     strategie incluse + portafoglio combinato
 nt8analyzer/ui/              interfaccia PySide6 + pyqtgraph
+nt8analyzer/ui/report.py     impaginazione A4 dei report (stampante, PDF, immagini)
+nt8analyzer/ui/print_templates.py   modello di stampa di ogni scheda
 tools/genera_esempi.py       genera i CSV di esempio
 tests/                       test pytest
 ```

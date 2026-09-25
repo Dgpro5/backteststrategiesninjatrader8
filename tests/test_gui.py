@@ -17,9 +17,13 @@ def test_app_renders_all_tabs(tmp_path):
     assert files
     code = main(["--screenshots", str(tmp_path), *files])
     assert code == 0
-    shots = sorted(os.listdir(tmp_path))
+    shots = sorted(f for f in os.listdir(tmp_path) if f.endswith(".png"))
     assert len(shots) == 5
     assert all(os.path.getsize(tmp_path / s) > 10_000 for s in shots)
+    # report di stampa di ogni scheda: PDF + anteprima della prima pagina
+    reports = sorted(os.listdir(tmp_path / "stampa"))
+    assert len([f for f in reports if f.endswith(".pdf")]) == 5
+    assert len([f for f in reports if f.endswith("_pagina1.png")]) == 5
 
 
 def test_single_strategy_and_toggles(tmp_path):

@@ -27,6 +27,40 @@ from . import theme
 from .widgets import KpiTile
 
 
+KPI_LABELS = [
+    "Profitto netto",
+    "Max drawdown",
+    "Profit factor",
+    "% vincenti",
+    "Expectancy / trade",
+    "Numero trade",
+    "Sharpe ratio",
+]
+
+
+def kpi_values(s: dict) -> list[tuple[str, str, int, str]]:
+    """(etichetta, valore, tono, sottotitolo) dei riquadri in alto, usati anche nella stampa."""
+    dd_sub = theme.fmt_pct(s["max_dd_pct"]) + " dal picco" if s["max_dd_pct"] is not None else ""
+    values = [
+        (theme.fmt_money(s["net_profit"]), theme.value_tone("money", s["net_profit"]), ""),
+        (theme.fmt_money(-s["max_dd"]) if s["max_dd"] else "$0.00", -1 if s["max_dd"] else 0, dd_sub),
+        (theme.fmt_ratio(s["profit_factor"]), 0, ""),
+        (theme.fmt_pct(s["win_rate"], 1), 0, f"{s['n_wins']} V / {s['n_losses']} P"),
+        (theme.fmt_money(s["avg_trade"]), theme.value_tone("money", s["avg_trade"]), ""),
+        (f"{s['n_trades']:,}", 0, f"{theme.fmt_ratio(s['trades_per_month'], 1)} al mese"),
+        (theme.fmt_ratio(s["sharpe"]), 0, f"Sortino {theme.fmt_ratio(s['sortino'])}"),
+    ]
+    return [(label, *v) for label, v in zip(KPI_LABELS, values)]
+
+
+def table_columns(portfolio: Portfolio) -> list[tuple[str, dict, int | None]]:
+    """(nome, statistiche, indice colore) per ogni colonna; None = portafoglio combinato."""
+    cols = [(e.name, e.stats, e.color_index) for e in portfolio.strategies]
+    if portfolio.combined is not None:
+        cols.append((portfolio.combined.name, portfolio.combined.stats, None))
+    return cols
+
+
 class StatsTab(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -47,16 +81,8 @@ class StatsTab(QWidget):
 
         kpis = QGridLayout()
         kpis.setSpacing(8)
-        self.kpi = {
-            "net_profit": KpiTile("Profitto netto"),
-            "max_dd": KpiTile("Max drawdown"),
-            "profit_factor": KpiTile("Profit factor"),
-            "win_rate": KpiTile("% vincenti"),
-            "avg_trade": KpiTile("Expectancy / trade"),
-            "n_trades": KpiTile("Numero trade"),
-            "sharpe": KpiTile("Sharpe ratio"),
-        }
-        for i, tile in enumerate(self.kpi.values()):
+        self.kpi = [KpiTile(label) for label in KPI_LABELS]
+        for i, tile in enumerate(self.kpi):
             kpis.addWidget(tile, 0, i)
         layout.addLayout(kpis)
 
@@ -85,22 +111,12 @@ class StatsTab(QWidget):
             self.title.setText(f"Riepilogo portafoglio combinato ({len(portfolio.strategies)} strategie)")
         else:
             self.title.setText(f"Riepilogo: {primary.name}")
-        s = primary.stats
-        self.kpi["net_profit"].set(theme.fmt_money(s["net_profit"]), theme.value_tone("money", s["net_profit"]))
-        dd_sub = theme.fmt_pct(s["max_dd_pct"]) + " dal picco" if s["max_dd_pct"] is not None else ""
-        self.kpi["max_dd"].set(theme.fmt_money(-s["max_dd"]) if s["max_dd"] else "$0.00", -1 if s["max_dd"] else 0, dd_sub)
-        self.kpi["profit_factor"].set(theme.fmt_ratio(s["profit_factor"]))
-        self.kpi["win_rate"].set(theme.fmt_pct(s["win_rate"], 1), sub=f"{s['n_wins']} V / {s['n_losses']} P")
-        self.kpi["avg_trade"].set(theme.fmt_money(s["avg_trade"]), theme.value_tone("money", s["avg_trade"]))
-        self.kpi["n_trades"].set(f"{s['n_trades']:,}", sub=f"{theme.fmt_ratio(s['trades_per_month'], 1)} al mese")
-        self.kpi["sharpe"].set(theme.fmt_ratio(s["sharpe"]), sub=f"Sortino {theme.fmt_ratio(s['sortino'])}")
+        for tile, (_label, value, tone, sub) in zip(self.kpi, kpi_values(primary.stats)):
+            tile.set(value, tone, sub)
         self._fill_table(portfolio)
 
     def _columns(self, portfolio: Portfolio):
-        cols = [(e.name, e.stats, e.color_index) for e in portfolio.strategies]
-        if portfolio.combined is not None:
-            cols.append((portfolio.combined.name, portfolio.combined.stats, None))
-        return cols
+        return table_columns(portfolio)
 
     def _fill_table(self, portfolio: Portfolio) -> None:
         cols = self._columns(portfolio)
