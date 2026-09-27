@@ -17,10 +17,14 @@ Tutti gli importi sono relativi al saldo iniziale (profitto dell'account).
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import itertools
+import time
+from dataclasses import dataclass, field, replace
+from typing import Callable
 
 import numpy as np
 
+from .metrics import drawdown_info
 from .models import TradeSet
 
 DD_TRAILING_EOD = "trailing_eod"
@@ -70,6 +74,7 @@ class PropFirmConfig:
     seed: int | None = None
     max_days: int | None = None  # giornate massime simulate per account (default: automatico)
     n_paths: int = 250  # simulazioni di cui si conserva il percorso per il grafico
+    eval_only: bool = False  # solo la valutazione (più veloce: usato per confrontare molte combinazioni)
 
 
 @dataclass
@@ -86,6 +91,7 @@ class PropFirmResult:
     paths: np.ndarray  # (n_paths, giorni + 1): profitto a fine giornata durante la valutazione (nan dopo)
     path_outcome: np.ndarray
     day_pnl: np.ndarray = field(default_factory=lambda: np.array([]))
+    eval_max_dd: np.ndarray = field(default_factory=lambda: np.array([]))  # drawdown massimo durante la valutazione
 
     @property
     def n_sims(self) -> int:
@@ -117,6 +123,28 @@ class PropFirmResult:
     def payout_rate_funded(self) -> float:
         """Probabilità di payout per chi ha passato la valutazione."""
         return self.rate(self.funded_outcome, PASSED, self.passed)
+
+    @property
+    def expected_days_to_pass(self) -> float:
+        """Giornate di trading medie per ottenere il conto finanziato, comprando un nuovo account a ogni
+        bocciatura: giornate delle valutazioni passate + quelle perse nei tentativi falliti."""
+        p = self.pass_rate
+        if not p > 0:
+            return float("inf")
+        passed = self.eval_days[self.passed].mean()
+        failed = self.eval_days[~self.passed].mean() if (~self.passed).any() else 0.0
+        return float(passed + failed * (1 - p) / p)
+
+    @property
+    def expected_days_to_payout(self) -> float:
+        """Come ``expected_days_to_pass`` ma fino al primo payout (valutazione + conto finanziato)."""
+        q = self.payout_rate
+        if not q > 0:
+            return float("inf")
+        spent = self.eval_days + np.where(self.funded_outcome == NOT_STARTED, 0, self.funded_days)
+        ok = self.paid
+        failed = spent[~ok].mean() if (~ok).any() else 0.0
+        return float(spent[ok].mean() + failed * (1 - q) / q)
 
     @property
     def total_days(self) -> np.ndarray:
@@ -179,6 +207,9 @@ def run_prop_firm(trades: TradeSet, cfg: PropFirmConfig, progress=None, orders: 
     funded_outcome = np.full(S, NOT_STARTED, np.int8)
     funded_days = np.zeros(S, np.int32)
     payout = np.full(S, np.nan)
+    closed_peak = np.zeros(S)  # massimo del saldo a trade chiusi durante la valutazione
+    eval_dd = np.zeros(S)
+    eval_max_dd = np.zeros(S)
     n_paths = min(cfg.n_paths, S)
     paths = np.full((n_paths, max_days + 1), np.nan)
     paths[:, 0] = 0.0
@@ -201,6 +232,8 @@ def run_prop_firm(trades: TradeSet, cfg: PropFirmConfig, progress=None, orders: 
         b = bal[active]
         pk = peak[active]
         th = thr[active]
+        cpk = closed_peak[active]
+        mdd = eval_dd[active]
         run = np.zeros(len(active))  # P&L della giornata
         alive = np.ones(len(active), bool)  # non bocciati
         trading = np.ones(len(active), bool)  # non fermati dal limite giornaliero
@@ -221,6 +254,7 @@ def run_prop_firm(trades: TradeSet, cfg: PropFirmConfig, progress=None, orders: 
                 low_b = np.minimum(b - mae, new_b)
                 low_run = np.minimum(run - mae, new_run)
             dd_hit = live & (low_b <= th)
+            mdd = np.where(live, np.maximum(mdd, cpk - low_b), mdd)
             if L > 0:
                 daily_level = b - run - L  # saldo al quale la perdita del giorno arriva al limite
                 over = live & (low_run <= -L)
@@ -240,6 +274,7 @@ def run_prop_firm(trades: TradeSet, cfg: PropFirmConfig, progress=None, orders: 
             alive &= ~dd_hit
             b = np.where(live, new_b, b)
             run = np.where(live, new_run, run)
+            cpk = np.where(live, np.maximum(cpk, b), cpk)
             if intraday:
                 pk = np.where(alive, np.maximum(pk, b), pk)
                 th = threshold(pk)
@@ -252,6 +287,8 @@ def run_prop_firm(trades: TradeSet, cfg: PropFirmConfig, progress=None, orders: 
         bal[active] = b
         peak[active] = pk
         thr[active] = th
+        closed_peak[active] = cpk
+        eval_dd[active] = mdd
         in_eval = phase[active] == 0
         dead = ~alive
 
@@ -259,6 +296,7 @@ def run_prop_firm(trades: TradeSet, cfg: PropFirmConfig, progress=None, orders: 
         idx = active[dead & in_eval]
         eval_outcome[idx] = failed_as[dead & in_eval]
         eval_days[idx] = days_in_phase[idx]
+        eval_max_dd[idx] = eval_dd[idx]
         phase[idx] = 2
         idx = active[dead & ~in_eval]
         funded_outcome[idx] = failed_as[dead & ~in_eval]
@@ -270,13 +308,17 @@ def run_prop_firm(trades: TradeSet, cfg: PropFirmConfig, progress=None, orders: 
         idx = active[ok]
         eval_outcome[idx] = PASSED
         eval_days[idx] = days_in_phase[idx]
-        phase[idx] = 1
-        funded_outcome[idx] = INCOMPLETE
-        bal[idx] = 0.0
-        peak[idx] = 0.0
-        thr[idx] = -D
-        days_in_phase[idx] = 0
-        qualifying[idx] = 0
+        eval_max_dd[idx] = eval_dd[idx]
+        if cfg.eval_only:
+            phase[idx] = 2
+        else:
+            phase[idx] = 1
+            funded_outcome[idx] = INCOMPLETE
+            bal[idx] = 0.0
+            peak[idx] = 0.0
+            thr[idx] = -D
+            days_in_phase[idx] = 0
+            qualifying[idx] = 0
 
         # conto finanziato: giornate valide e primo payout
         funded = alive & ~in_eval
@@ -301,6 +343,7 @@ def run_prop_firm(trades: TradeSet, cfg: PropFirmConfig, progress=None, orders: 
                 break
 
     # chi non ha concluso entro le giornate massime
+    eval_max_dd[phase == 0] = eval_dd[phase == 0]
     eval_outcome[phase == 0] = INCOMPLETE
     eval_days[phase == 0] = days_in_phase[phase == 0]
     funded_outcome[phase == 1] = INCOMPLETE
@@ -320,6 +363,7 @@ def run_prop_firm(trades: TradeSet, cfg: PropFirmConfig, progress=None, orders: 
         paths=paths[:, : last + 1],
         path_outcome=eval_outcome[:n_paths].copy(),
         day_pnl=P.sum(axis=1),
+        eval_max_dd=eval_max_dd,
     )
 
 
@@ -337,3 +381,220 @@ def describe(values: np.ndarray) -> dict[str, float]:
         "min": float(values.min()),
         "max": float(values.max()),
     }
+
+
+# --------------------------------------------------------------------------- selezione delle strategie
+
+RISK_HISTORICAL = "historical"
+RISK_EVAL = "evaluation"
+RISK_MEASURES = {
+    RISK_HISTORICAL: "DD storico",
+    RISK_EVAL: "DD in valutazione (95%)",
+}
+
+SORT_EXPECTED = "expected"
+SORT_DAYS = "days"
+SORT_PASS = "pass"
+SORT_PAYOUT = "payout"
+SORT_KEYS = {
+    SORT_EXPECTED: "Tempo per passare",
+    SORT_DAYS: "Giornate quando passa",
+    SORT_PASS: "Probabilità di passare",
+    SORT_PAYOUT: "Tempo al primo payout",
+}
+
+STATUS_OK = "ok"  # rischio entro il drawdown desiderato
+STATUS_TOLERATED = "tolerated"  # oltre il desiderato ma entro il massimo accettabile
+STATUS_OVER = "over"  # oltre il massimo accettabile: esclusa
+
+
+@dataclass
+class OptimizerOptions:
+    desired_dd: float = 2_000.0  # drawdown che si vorrebbe non superare
+    max_dd: float = 2_500.0  # oltre questo la combinazione è esclusa; fino a qui conta solo la velocità
+    risk_measure: str = RISK_HISTORICAL
+    sort_by: str = SORT_EXPECTED
+    min_size: int = 1
+    max_size: int = 0  # 0 = fino a tutte le strategie
+    sims: int = 300  # simulazioni per combinazione nel primo passaggio
+    refine_top: int = 10  # le migliori vengono ricalcolate con tutte le simulazioni
+    max_days: int = 250  # giornate massime di una valutazione (oltre: non passata)
+
+
+@dataclass
+class ComboResult:
+    members: tuple[int, ...]
+    names: tuple[str, ...]
+    hist_dd: float
+    net_profit: float
+    eval_dd95: float = float("nan")
+    pass_rate: float = float("nan")
+    days_mean: float = float("nan")
+    days_median: float = float("nan")
+    expected_days: float = float("nan")
+    payout_rate: float = float("nan")
+    expected_payout_days: float = float("nan")
+    status: str = STATUS_OK
+    refined: bool = False
+    simulated: bool = False
+
+    @property
+    def size(self) -> int:
+        return len(self.members)
+
+    @property
+    def accounts(self) -> float:
+        """Account medi da acquistare per passare una valutazione (1 / probabilità)."""
+        return 1 / self.pass_rate if self.pass_rate > 0 else float("inf")
+
+    def risk(self, measure: str) -> float:
+        return self.eval_dd95 if measure == RISK_EVAL else self.hist_dd
+
+
+@dataclass
+class OptimizationResult:
+    options: OptimizerOptions
+    combos: list[ComboResult]  # accettate in ordine di classifica, poi le escluse
+    tested: int
+    total: int
+    cancelled: bool = False
+    elapsed: float = 0.0
+
+    @property
+    def accepted(self) -> list[ComboResult]:
+        return [c for c in self.combos if c.status != STATUS_OVER and c.simulated]
+
+    @property
+    def excluded(self) -> list[ComboResult]:
+        return [c for c in self.combos if c.status == STATUS_OVER]
+
+    @property
+    def best(self) -> ComboResult | None:
+        accepted = self.accepted
+        return accepted[0] if accepted else None
+
+
+class _Trades:
+    """I soli campi che servono alla simulazione, per unire velocemente molte combinazioni."""
+
+    def __init__(self, entry_time, exit_time, profit, mae):
+        self.entry_time, self.exit_time, self.profit, self.mae = entry_time, exit_time, profit, mae
+
+    def __len__(self) -> int:
+        return len(self.profit)
+
+
+def _combine(parts: list[TradeSet]) -> _Trades:
+    entry = np.concatenate([p.entry_time for p in parts])
+    exit_ = np.concatenate([p.exit_time for p in parts])
+    order = np.lexsort((entry, exit_))
+    return _Trades(entry[order], exit_[order], np.concatenate([p.profit for p in parts])[order],
+                   np.concatenate([p.mae for p in parts])[order])
+
+
+def count_combinations(n: int, min_size: int = 1, max_size: int = 0) -> int:
+    from math import comb
+
+    max_size = max_size or n
+    return sum(comb(n, k) for k in range(max(1, min_size), min(n, max_size) + 1))
+
+
+def _classify(combo: ComboResult, opts: OptimizerOptions) -> str:
+    risk = combo.risk(opts.risk_measure)
+    if not np.isfinite(risk):
+        return STATUS_OK
+    limit = max(opts.max_dd, opts.desired_dd)
+    if risk > limit:
+        return STATUS_OVER
+    return STATUS_OK if risk <= opts.desired_dd else STATUS_TOLERATED
+
+
+def _fill(combo: ComboResult, r: PropFirmResult, opts: OptimizerOptions) -> None:
+    passed = r.passed
+    combo.simulated = True
+    combo.pass_rate = r.pass_rate
+    combo.days_mean = float(r.eval_days[passed].mean()) if passed.any() else float("nan")
+    combo.days_median = float(np.median(r.eval_days[passed])) if passed.any() else float("nan")
+    combo.expected_days = r.expected_days_to_pass
+    combo.eval_dd95 = float(np.percentile(r.eval_max_dd, 95)) if len(r.eval_max_dd) else float("nan")
+    if not r.config.eval_only:
+        combo.payout_rate = r.payout_rate
+        combo.expected_payout_days = r.expected_days_to_payout
+    combo.status = _classify(combo, opts)
+
+
+def _sort_key(combo: ComboResult, opts: OptimizerOptions):
+    risk = combo.risk(opts.risk_measure)
+    risk = risk if np.isfinite(risk) else 0.0
+    if opts.sort_by == SORT_PASS:
+        return (-combo.pass_rate, combo.expected_days, risk)
+    if opts.sort_by == SORT_DAYS:
+        days = combo.days_mean if np.isfinite(combo.days_mean) else float("inf")
+        return (days, -combo.pass_rate, risk)
+    if opts.sort_by == SORT_PAYOUT:
+        return (combo.expected_payout_days, combo.expected_days, risk)
+    return (combo.expected_days, -combo.pass_rate, risk)
+
+
+def optimize_combinations(
+    strategies: list[tuple[str, TradeSet]],
+    cfg: PropFirmConfig,
+    opts: OptimizerOptions,
+    progress: Callable[[int, int], bool] | None = None,
+) -> OptimizationResult:
+    """Prova tutte le combinazioni delle strategie e le ordina per velocità di passaggio.
+
+    1. Per ogni combinazione: drawdown storico e, se non è già oltre il massimo accettabile, una simulazione
+       veloce (``opts.sims`` simulazioni, solo valutazione salvo l'ordinamento per payout).
+    2. Le ``opts.refine_top`` migliori vengono ricalcolate con tutte le simulazioni di ``cfg`` e con il payout.
+
+    Tutte le combinazioni usano lo stesso seed, così il confronto non dipende dalla fortuna del sorteggio."""
+    start = time.time()
+    n = len(strategies)
+    max_size = min(n, opts.max_size or n)
+    combos_idx = [c for k in range(max(1, opts.min_size), max_size + 1) for c in itertools.combinations(range(n), k)]
+    total = len(combos_idx) + min(opts.refine_top, len(combos_idx))
+    seed = cfg.seed if cfg.seed is not None else int(np.random.default_rng().integers(1, 2**31 - 1))
+    screen_cfg = replace(cfg, n_sims=opts.sims, eval_only=opts.sort_by != SORT_PAYOUT, max_days=opts.max_days,
+                         n_paths=0, seed=seed)
+    full_cfg = replace(cfg, eval_only=False, n_paths=0, seed=seed,
+                       max_days=cfg.max_days or opts.max_days + 4 * max(cfg.payout_days, 1) + 60)
+    parts = [ts for _name, ts in strategies]
+    results: list[ComboResult] = []
+    cancelled = False
+    done = 0
+
+    def trades_of(members) -> _Trades:
+        return _combine([parts[i] for i in members])
+
+    for members in combos_idx:
+        trades = trades_of(members)
+        info = drawdown_info(trades.profit * cfg.multiplier)
+        combo = ComboResult(members, tuple(strategies[i][0] for i in members), info.max_dd,
+                            float(trades.profit.sum() * cfg.multiplier))
+        results.append(combo)
+        if opts.risk_measure == RISK_HISTORICAL and _classify(combo, opts) == STATUS_OVER:
+            combo.status = STATUS_OVER  # già troppo rischiosa: inutile simularla
+        else:
+            _fill(combo, run_prop_firm(trades, screen_cfg), opts)
+        done += 1
+        if progress is not None and not progress(done, total):
+            cancelled = True
+            break
+
+    accepted = sorted((c for c in results if c.simulated and c.status != STATUS_OVER), key=lambda c: _sort_key(c, opts))
+    if not cancelled:
+        for combo in accepted[: opts.refine_top]:
+            _fill(combo, run_prop_firm(trades_of(combo.members), full_cfg), opts)
+            combo.refined = True
+            done += 1
+            if progress is not None and not progress(done, total):
+                cancelled = True
+                break
+    accepted = sorted((c for c in results if c.simulated and c.status != STATUS_OVER),
+                      key=lambda c: (not c.refined, _sort_key(c, opts)))
+    over = sorted((c for c in results if c.status == STATUS_OVER), key=lambda c: c.risk(opts.risk_measure))
+    others = [c for c in results if not c.simulated and c.status != STATUS_OVER]
+    return OptimizationResult(opts, accepted + others + over, tested=len(results), total=len(combos_idx),
+                              cancelled=cancelled, elapsed=time.time() - start)
+

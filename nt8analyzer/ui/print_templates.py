@@ -21,6 +21,7 @@ from PySide6.QtWidgets import QApplication
 from ..metrics import STAT_DEFS, daily_correlation, monthly_pnl
 from ..montecarlo import RANK_FINAL, RANK_MAX_DD, RANK_RATIO, SHUFFLE
 from ..portfolio import Entity, Portfolio
+from ..propfirm import RISK_MEASURES, SORT_KEYS, STATUS_OK, STATUS_OVER, STATUS_TOLERATED
 from . import theme
 from .analysis_tab import AnalysisTab
 from .equity_tab import EquityTab, diverging_color, summary_values
@@ -34,6 +35,7 @@ from .report import (
     InfoBar,
     Kpi,
     KpiBlock,
+    PageBreak,
     ReportContent,
     SectionTitle,
     TableBlock,
@@ -44,12 +46,15 @@ from .report import (
     tone_color,
 )
 from .propfirm_tab import (
+    OPT_HEADERS,
     OUTCOME_HEADERS,
     TIMING_HEADERS,
     PropFirmTab,
     fmt_timing,
     kpi_values,
     method_note,
+    optimization_rows,
+    optimization_summary,
     outcome_rows,
     rules_text,
     timing_rows,
@@ -627,7 +632,43 @@ def propfirm_section(window) -> ReportContent:
         TableBlock(timing_cols, timing, title="Tempi (giornate di trading) e importo del primo payout", font_size=7.2),
         ChartGrid([_chart(tab.pass_plot, 0.55, 0.75), _chart(tab.payout_plot, 0.55, 0.75)], columns=2),
     ]
+    if live.optimization is not None:
+        blocks += _optimization_blocks(live.optimization)
     return ReportContent("Prop Firm", subtitle, blocks, _meta(portfolio), key="propfirm")
+
+
+def _optimization_blocks(res) -> list:
+    """Classifica delle combinazioni di strategie (se è stata calcolata nella scheda Prop Firm)."""
+    o = res.options
+    status_colors = {STATUS_OK: P["POSITIVE_TEXT"], STATUS_TOLERATED: P["MC_CONF"], STATUS_OVER: P["NEGATIVE_TEXT"]}
+    priorities = {"Giornate quando passa": 1, "Tempo al payout": 1, "Account medi": 2, "DD valutazione 95%": 2, "N.": 3}
+    columns = [TableColumn(h, weight=3.0 if h == "Strategie" else 1.0, align="left" if h in ("Strategie", "Rischio") else "right",
+                           priority=priorities.get(h, 0), max_share=0.34 if h == "Strategie" else 0.45)
+               for h in OPT_HEADERS]
+    rows = []
+    for row in optimization_rows(res, limit=20, excluded_limit=5):
+        combo = row["combo"]
+        cells = []
+        for c, text in enumerate(row["cells"]):
+            color = status_colors[combo.status] if c == 11 else (P["MUTED"] if combo.status == STATUS_OVER else None)
+            cells.append(Cell(text, color=color, bold=combo.refined and c in (0, 1, 3)))
+        rows.append(TableRow(cells))
+    return [
+        PageBreak(),
+        SectionTitle("Selezione delle strategie migliori per passare la prop firm"),
+        InfoBar([
+            ("Drawdown desiderato", theme.fmt_money(o.desired_dd, 0)),
+            ("Massimo accettabile", theme.fmt_money(max(o.max_dd, o.desired_dd), 0)),
+            ("Misura del rischio", RISK_MEASURES[o.risk_measure]),
+            ("Ordinate per", SORT_KEYS[o.sort_by]),
+            ("Combinazioni provate", f"{res.tested:,} di {res.total:,}"),
+        ]),
+        TableBlock(columns, rows, font_size=6.9, title="Combinazioni in ordine di velocità"),
+        TextBlock(optimization_summary(res) + " ✓ = verificata con tutte le simulazioni e con il payout. "
+                  "«Tempo per passare»: giornate di trading medie per ottenere il conto finanziato, comprando un nuovo "
+                  "account a ogni bocciatura. Le combinazioni con rischio fino al massimo accettabile contano solo per "
+                  "la velocità."),
+    ]
 
 
 def summary_section(window) -> ReportContent:

@@ -14,7 +14,7 @@ Ogni scheda si stampa (o si salva in PDF) e c'è un **resoconto completo** di tu
 | **Statistiche** | Oltre 50 metriche per ogni strategia e per il portafoglio combinato: profitto netto, profit factor, expectancy, % vincenti, max drawdown ($ e %), durata e date del drawdown, max perdita consecutiva, peggior giorno/mese, Sharpe, Sortino, SQN, Kelly, CAGR, MAE/MFE/ETD… Esportabili in CSV. |
 | **Equity curve** | Una curva per strategia, ognuna di un colore diverso. Con 2 o più strategie compare la curva **nera** (bianca nel tema scuro) del portafoglio combinato, con il suo **max drawdown** evidenziato (picco ▼, minimo ▲) e il grafico del drawdown sotto. Tabella con max DD di ogni strategia e del combinato, e correlazione del P&L giornaliero. |
 | **Monte Carlo** | Tutte le simulazioni in **grigio**, la migliore in **verde**, la peggiore in **rosso**, la media in **blu**. Per ogni metrica (max drawdown $ e %, max perdita consecutiva, perdite di fila, peggior trade, durata del drawdown, profitto, recovery factor, expectancy, profit factor, % vincenti): caso migliore, medio, mediana, confidenza 95% e 99%, caso peggiore e valore originale. Probabilità che il drawdown superi una soglia (es. limite prop firm) e istogramma delle distribuzioni. |
-| **Prop Firm** | Inserisci le regole dell'account (dimensione, profit target, drawdown massimo trailing o statico, drawdown giornaliero, giornate minime) e le condizioni del payout (giornate valide con un profitto minimo): l'app rimescola a caso le giornate di trading del backtest, ognuna con i suoi trade, e calcola il **tasso di passaggio**, le **giornate medie per passare**, la probabilità di arrivare al **primo payout**, le giornate per arrivarci e l'importo medio del payout. |
+| **Prop Firm** | Inserisci le regole dell'account (dimensione, profit target, drawdown massimo trailing o statico, drawdown giornaliero, giornate minime) e le condizioni del payout (giornate valide con un profitto minimo): l'app rimescola a caso le giornate di trading del backtest, ognuna con i suoi trade, e calcola il **tasso di passaggio**, le **giornate medie per passare**, la probabilità di arrivare al **primo payout**, le giornate per arrivarci e l'importo medio del payout. Prova anche tutte le combinazioni di strategie per trovare quelle che passano **nel minor tempo** con il rischio che scegli. |
 | **Analisi grafica** | Per una strategia o il portafoglio: equity, drawdown, P&L per trade, distribuzione, P&L mensile, per ora di entrata, per giorno della settimana, per tipo di uscita, MAE vs risultato e tabella mensile per anno. |
 | **Lista trade** | Tutti i trade nell'ordine cronologico combinato, con cumulativo e drawdown. |
 
@@ -38,6 +38,32 @@ tasto destro → *Export* per salvare l'immagine.
 - Risultati: tasso di passaggio, giornate per passare (e stima in giorni di calendario), probabilità e giornate
   per il primo payout, payout medio, percentuali di bocciatura per drawdown massimo e giornaliero, grafico dei
   percorsi (verdi le valutazioni passate, rosse le bocciate) e distribuzioni dei tempi.
+
+#### Selezione delle strategie migliori
+
+![Selezione delle strategie](docs/img/prop_firm_selezione.png)
+
+In fondo alla scheda Prop Firm, **Trova le combinazioni migliori** prova **tutte le combinazioni** delle strategie
+caricate (anche quelle senza spunta) con le regole dell'account e le mette in classifica per velocità.
+
+- **Drawdown desiderato** e **massimo accettabile**: il desiderato è un limite morbido. Per esempio, con desiderato
+  2.000 $ e massimo 2.500 $ una combinazione con drawdown di 2.400 $ resta in classifica (in arancione, "oltre il
+  desiderato") e conta solo quanto è veloce; oltre 2.500 $ viene esclusa.
+- **Misura del rischio**: il max drawdown storico della combinazione nel backtest, oppure il drawdown raggiunto
+  durante le valutazioni simulate (95% delle simulazioni).
+- **Ordina per**:
+  - *Tempo per passare* (predefinito): giornate medie per avere il conto finanziato, comprando un nuovo account a
+    ogni bocciatura. Premia la velocità anche a costo di bruciare qualche account;
+  - giornate quando passa;
+  - probabilità di passare;
+  - tempo al primo payout.
+- Nella tabella: probabilità di passare, account medi da acquistare, primo payout, drawdown storico e in
+  valutazione. Le prime 10 (✓) sono ricalcolate con tutte le simulazioni e con il payout.
+- **Usa questa combinazione** (o doppio clic sulla riga) lascia nel portafoglio solo quelle strategie e mostra la sua
+  simulazione nella scheda. La classifica è anche nella stampa della scheda Prop Firm e nel resoconto.
+
+Con molte strategie le combinazioni crescono in fretta (10 strategie = 1.023 combinazioni, circa 35 s): si può
+limitare il numero di strategie per combinazione.
 
 ### Stampa e PDF
 

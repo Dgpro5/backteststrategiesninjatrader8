@@ -87,6 +87,7 @@ class MainWindow(QMainWindow):
         self.equity_tab = EquityTab()
         self.mc_tab = MonteCarloTab()
         self.prop_tab = PropFirmTab()
+        self.prop_tab.includeRequested.connect(self.include_only)
         self.trades_tab = TradesTab()
         for widget, title in (
             (self.stats_tab, "Statistiche"),
@@ -428,6 +429,16 @@ class MainWindow(QMainWindow):
         self._rebuild_list()
         self.refresh()
 
+    def include_only(self, keys: list[str]) -> None:
+        """Tiene nel portafoglio solo le strategie indicate (le altre restano caricate senza spunta)."""
+        wanted = set(keys)
+        for s in self.strategies:
+            s.included = str(s.uid) in wanted
+        self._rebuild_list()
+        self.refresh()
+        names = [s.name for s in self.strategies if s.included]
+        self.statusBar().showMessage(f"Portafoglio: {len(names)} strategie ({', '.join(names)})", 10000)
+
     def clear_all(self) -> None:
         self.strategies = []
         self._rebuild_list()
@@ -440,6 +451,8 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------ ricalcolo
     def refresh(self) -> None:
         self.portfolio = Portfolio(self.strategies, self.capital.value())
+        # la selezione delle strategie della scheda Prop Firm prova tutte quelle caricate, anche senza spunta
+        self.prop_tab.set_candidates([(str(s.uid), s.name, s.labeled_trades()) for s in self.strategies if len(s.trades)])
         if self.portfolio.empty:
             self.stack.setCurrentIndex(0)
             if self.strategies:

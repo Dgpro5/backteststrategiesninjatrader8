@@ -141,6 +141,7 @@ class TableColumn:
     swatch: tuple[str, Qt.PenStyle] | None = None
     color: str | None = None  # colore del testo dell'intestazione
     priority: int = 0  # > 0: colonna omessa (prima le priorità più alte) se il foglio è troppo stretto
+    max_share: float = 0.45  # larghezza massima rispetto al foglio (il testo più lungo viene troncato)
 
 
 @dataclass
@@ -697,7 +698,7 @@ class _Layout:
             else:  # una sola parola: non si spezza
                 head = head_full
             natural = max(data, head) + 2 * CELL_PAD + 1
-            widths.append(min(max(natural, col.min_width), self.W * 0.45))
+            widths.append(min(max(natural, col.min_width), self.W * col.max_share))
         return widths
 
     @staticmethod

@@ -204,3 +204,52 @@ def test_propfirm_tab(tmp_path):
         theme.set_mode("light")
         theme.apply_theme(app)
         window.close()
+
+
+def test_propfirm_strategy_selection():
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QApplication
+
+    from nt8analyzer.propfirm import STATUS_OVER
+    from nt8analyzer.ui import theme
+    from nt8analyzer.ui.main_window import MainWindow
+    from nt8analyzer.ui.print_templates import build_report
+    from nt8analyzer.ui.report import TableBlock
+
+    app = QApplication.instance() or QApplication([])
+    theme.set_mode("light")
+    theme.apply_theme(app)
+    window = MainWindow(theme_preference="light", persist_theme=False)
+    try:
+        window.load_files(sorted(glob.glob(os.path.join(EXAMPLES_DIR, "*.csv"))), interactive=False)
+        # una strategia senza spunta viene comunque provata nelle combinazioni
+        window.list.item(2).setCheckState(Qt.Unchecked)
+        window.refresh()
+        tab = window.prop_tab
+        assert len(tab.candidates) == 3
+        assert "7 combinazioni" in tab.opt_count.text()
+        tab.opt_desired.setValue(1500)
+        tab.opt_max.setValue(2000)
+        tab.opt_sims.setValue(100)
+        tab.sims.setValue(300)
+        tab.run_optimizer()
+        res = tab.optimization
+        assert res is not None and res.tested == 7
+        assert tab.opt_table.rowCount() == len(res.accepted) + len(res.excluded[:20])
+        assert all(c.hist_dd > 2000 for c in res.combos if c.status == STATUS_OVER)
+        best = res.best
+        assert best is not None and tab.opt_include.isEnabled()
+        assert tab.opt_table.item(0, 1).text() == " + ".join(best.names)
+        # "Usa questa combinazione": nel portafoglio restano solo quelle strategie
+        tab.include_selected()
+        included = [s.name for s in window.strategies if s.included]
+        assert sorted(included) == sorted(best.names)
+        assert tab.optimization is res  # la classifica resta visibile
+        # la classifica è anche nella stampa della scheda Prop Firm
+        content = build_report(window, 3)
+        assert any(isinstance(b, TableBlock) and b.title == "Combinazioni in ordine di velocità" for b in content.blocks)
+        # strategie rimosse: la classifica non vale più
+        window.clear_all()
+        assert tab.optimization is None
+    finally:
+        window.close()

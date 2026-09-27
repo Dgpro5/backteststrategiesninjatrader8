@@ -227,3 +227,81 @@ def test_random_runs_are_reproducible_and_consistent():
     stats = describe(a.eval_days[a.passed])
     assert stats["min"] <= stats["median"] <= stats["max"]
     assert np.isnan(describe(np.array([]))["mean"])
+
+
+# --------------------------------------------------------------------------- selezione delle strategie
+
+
+def _strategy(seed: int, win: float, loss: float, p_win: float, n_days: int = 250) -> TradeSet:
+    rng = np.random.default_rng(seed)
+    days = [[win if rng.random() < p_win else -loss] for _ in range(n_days)]
+    return trades_by_day(days)
+
+
+def test_optimizer_ranks_by_speed_within_the_risk_limit():
+    from nt8analyzer.propfirm import (
+        RISK_EVAL,
+        SORT_PASS,
+        STATUS_OK,
+        STATUS_OVER,
+        STATUS_TOLERATED,
+        OptimizerOptions,
+        count_combinations,
+        optimize_combinations,
+    )
+
+    strategies = [
+        ("Lenta sicura", _strategy(1, 60, 40, 0.55)),
+        ("Veloce", _strategy(2, 300, 200, 0.55)),
+        ("Molto rischiosa", _strategy(3, 1500, 1400, 0.5)),
+    ]
+    cfg = PropFirmConfig(profit_target=3000, max_drawdown=2500, n_sims=400, seed=7)
+    opts = OptimizerOptions(desired_dd=1500, max_dd=2500, sims=150, refine_top=3)
+    res = optimize_combinations(strategies, cfg, opts)
+    assert res.total == count_combinations(3) == 7 and res.tested == 7 and not res.cancelled
+    by_names = {c.names: c for c in res.combos}
+    # rischio classificato con il drawdown storico: desiderato 1.500, accettato fino a 2.500
+    for combo in res.combos:
+        if combo.hist_dd <= 1500:
+            assert combo.status == STATUS_OK
+        elif combo.hist_dd <= 2500:
+            assert combo.status == STATUS_TOLERATED
+        else:
+            assert combo.status == STATUS_OVER and not combo.simulated  # esclusa senza simularla
+    assert by_names[("Molto rischiosa",)].status == STATUS_OVER
+    accepted = res.accepted
+    assert accepted and all(c.status != STATUS_OVER for c in accepted)
+    # le verificate (✓) vengono prima e sono in ordine di tempo per passare
+    refined = [c for c in accepted if c.refined]
+    assert len(refined) == min(3, len(accepted)) and accepted[: len(refined)] == refined
+    assert [c.expected_days for c in refined] == sorted(c.expected_days for c in refined)
+    assert all(np.isfinite(c.payout_rate) for c in refined)  # con il payout
+    # la strategia lenta è la più lenta a passare
+    assert by_names[("Veloce",)].expected_days < by_names[("Lenta sicura",)].expected_days
+    assert res.best is accepted[0]
+
+    # misura sul drawdown in valutazione: tutte simulate; ordinamento per probabilità
+    res = optimize_combinations(strategies, cfg, OptimizerOptions(desired_dd=1500, max_dd=2500, sims=150,
+                                                                   refine_top=2, risk_measure=RISK_EVAL,
+                                                                   sort_by=SORT_PASS, max_size=2))
+    assert res.total == 6 and all(c.simulated for c in res.combos)
+    top = [c for c in res.accepted if c.refined]
+    assert [c.pass_rate for c in top] == sorted((c.pass_rate for c in top), reverse=True)
+
+    # annullamento
+    calls = []
+    res = optimize_combinations(strategies, cfg, opts, progress=lambda done, total: calls.append(done) or done < 2)
+    assert res.cancelled and res.tested == 2
+
+
+def test_expected_days_include_failed_attempts():
+    cfg = PropFirmConfig(profit_target=1000, max_drawdown=500, drawdown_type=DD_STATIC)
+    days = [[600.0], [600.0], [-300.0]]
+    orders = np.array([[0, 1, 2], [2, 2, 0], [2, 0, 1], [1, 0, 2]])
+    r = run_prop_firm(trades_by_day(days), cfg, orders=orders)
+    # 1° e 4° passano in 2 giornate; 2° bocciata in 2 (-300, -300); 3° non conclusa in 3 (-300, +600, +600 = 900)
+    assert list(r.eval_outcome) == [PASSED, FAIL_DD, INCOMPLETE, PASSED]
+    assert r.pass_rate == 0.5
+    # giornate delle passate + giornate perse nei tentativi non riusciti × (1 - p) / p
+    assert r.expected_days_to_pass == pytest.approx(2 + 2.5 * 1)
+    assert list(r.eval_max_dd) == pytest.approx([0.0, 600.0, 300.0, 0.0])
