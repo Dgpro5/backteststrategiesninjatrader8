@@ -37,8 +37,10 @@ from . import theme
 from .analysis_tab import AnalysisTab
 from .equity_tab import EquityTab
 from .montecarlo_tab import MonteCarloTab
-from .print_templates import build_report, report_filename
-from .report import ReportContent, export_pdf, make_printer, print_to
+from .print_templates import build_report, release_offscreen, report_filename
+from .propfirm_tab import PropFirmTab
+from .report import ORIENTATION_LABELS, PrintJob, ReportContent, orientation_from_key
+from .report_dialog import ReportDialog
 from .stats_tab import StatsTab
 from .trades_tab import TradesTab
 from .widgets import restyle_all
@@ -59,6 +61,7 @@ class MainWindow(QMainWindow):
         """``theme_preference``: "light", "dark" o "system" (già applicata da chi crea la finestra)."""
         super().__init__()
         self.setWindowTitle(f"{APP_NAME} {__version__}")
+        self.setAttribute(Qt.WA_DeleteOnClose)  # alla chiusura si liberano anche le copie fuori schermo per la stampa
         self.resize(1480, 940)
         self.setAcceptDrops(True)
         self.settings = QSettings()
@@ -83,11 +86,14 @@ class MainWindow(QMainWindow):
         self.analysis_tab = AnalysisTab()
         self.equity_tab = EquityTab()
         self.mc_tab = MonteCarloTab()
+        self.prop_tab = PropFirmTab()
+        self.prop_tab.includeRequested.connect(self.include_only)
         self.trades_tab = TradesTab()
         for widget, title in (
             (self.stats_tab, "Statistiche"),
             (self.equity_tab, "Equity curve"),
             (self.mc_tab, "Monte Carlo"),
+            (self.prop_tab, "Prop Firm"),
             (self.analysis_tab, "Analisi grafica"),
             (self.trades_tab, "Lista trade"),
         ):
@@ -126,6 +132,23 @@ class MainWindow(QMainWindow):
         pdf_action.setShortcut(QKeySequence("Ctrl+Shift+P"))
         pdf_action.triggered.connect(self.export_current_pdf)
         file_menu.addAction(pdf_action)
+        report_action = QAction("Resoconto completo (stampa o PDF)…", self)
+        report_action.setShortcut(QKeySequence("Ctrl+Shift+R"))
+        report_action.triggered.connect(self.open_full_report)
+        file_menu.addAction(report_action)
+        orientation_menu = file_menu.addMenu("Orientamento del foglio")
+        self._orientation_actions: dict[str, QAction] = {}
+        orientation_group = QActionGroup(self)
+        orientation_group.setExclusive(True)
+        current = str(self.settings.value("print/orientation", "landscape"))
+        for key, label in ORIENTATION_LABELS.items():
+            action = QAction(label, self, checkable=True)
+            action.setChecked(key == current)
+            action.triggered.connect(lambda checked=False, k=key: self.settings.setValue("print/orientation", k))
+            orientation_group.addAction(action)
+            orientation_menu.addAction(action)
+            self._orientation_actions[key] = action
+        file_menu.aboutToShow.connect(self._sync_orientation_actions)
         file_menu.addSeparator()
         quit_action = QAction("Esci", self)
         quit_action.setShortcut(QKeySequence.Quit)
@@ -164,8 +187,13 @@ class MainWindow(QMainWindow):
         pdf_btn = QPushButton("PDF…")
         pdf_btn.setToolTip("Salva la scheda visibile come PDF (Ctrl+Maiusc+P)")
         pdf_btn.clicked.connect(self.export_current_pdf)
+        report_btn = QPushButton("Resoconto…")
+        report_btn.setToolTip("Stampa o salva in PDF un resoconto di tutte le schede, scegliendo le pagine "
+                              "e il foglio verticale o orizzontale (Ctrl+Maiusc+R)")
+        report_btn.clicked.connect(self.open_full_report)
         row.addWidget(print_btn)
         row.addWidget(pdf_btn)
+        row.addWidget(report_btn)
         return box
 
     def _build_sidebar(self) -> QWidget:
@@ -401,6 +429,16 @@ class MainWindow(QMainWindow):
         self._rebuild_list()
         self.refresh()
 
+    def include_only(self, keys: list[str]) -> None:
+        """Tiene nel portafoglio solo le strategie indicate (le altre restano caricate senza spunta)."""
+        wanted = set(keys)
+        for s in self.strategies:
+            s.included = str(s.uid) in wanted
+        self._rebuild_list()
+        self.refresh()
+        names = [s.name for s in self.strategies if s.included]
+        self.statusBar().showMessage(f"Portafoglio: {len(names)} strategie ({', '.join(names)})", 10000)
+
     def clear_all(self) -> None:
         self.strategies = []
         self._rebuild_list()
@@ -413,6 +451,8 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------ ricalcolo
     def refresh(self) -> None:
         self.portfolio = Portfolio(self.strategies, self.capital.value())
+        # la selezione delle strategie della scheda Prop Firm prova tutte quelle caricate, anche senza spunta
+        self.prop_tab.set_candidates([(str(s.uid), s.name, s.labeled_trades()) for s in self.strategies if len(s.trades)])
         if self.portfolio.empty:
             self.stack.setCurrentIndex(0)
             if self.strategies:
@@ -426,6 +466,7 @@ class MainWindow(QMainWindow):
         finally:
             QApplication.restoreOverrideCursor()
         self.mc_tab.update_portfolio(self.portfolio)
+        self.prop_tab.update_portfolio(self.portfolio)
 
     # ------------------------------------------------------------------ stampa
     def current_report(self) -> ReportContent | None:
@@ -439,39 +480,59 @@ class MainWindow(QMainWindow):
         finally:
             QApplication.restoreOverrideCursor()
 
+    def print_orientation(self):
+        return orientation_from_key(str(self.settings.value("print/orientation", "landscape")))
+
+    def _sync_orientation_actions(self) -> None:
+        current = str(self.settings.value("print/orientation", "landscape"))
+        for key, action in self._orientation_actions.items():
+            action.setChecked(key == current)
+
     def print_current(self) -> None:
         content = self.current_report()
-        if content is None:
-            return
-        printer = make_printer(content.title)
-        preview = QPrintPreviewDialog(printer, self)
-        preview.setWindowTitle(f"Anteprima di stampa · {content.title}")
-        preview.paintRequested.connect(lambda target: print_to(content, target))
-        preview.resize(1200, 860)
-        preview.exec()
+        if content is not None:
+            self.preview_job(PrintJob(content, self.print_orientation()))
 
     def export_current_pdf(self) -> None:
         content = self.current_report()
-        if content is None:
+        if content is not None:
+            self.save_job_pdf(PrintJob(content, self.print_orientation()))
+
+    def open_full_report(self) -> None:
+        if self.portfolio is None or self.portfolio.empty:
+            QMessageBox.information(self, "Resoconto", "Carica almeno un file CSV prima di stampare.")
             return
+        ReportDialog(self).exec()
+
+    def preview_job(self, job: PrintJob) -> None:
+        """Anteprima di stampa: da qui si sceglie la stampante (e, se serve, un intervallo di pagine)."""
+        printer = job.make_printer()  # la finestra non ne prende possesso: deve restare vivo fino alla chiusura
+        preview = QPrintPreviewDialog(printer, self)
+        preview.setWindowTitle(f"Anteprima di stampa · {job.title}")
+        preview.paintRequested.connect(job.print_to)
+        preview.resize(1200, 860)
+        preview.exec()
+
+    def save_job_pdf(self, job: PrintJob) -> bool:
         folder = str(self.settings.value("pdf_dir", self.settings.value("last_dir", os.path.expanduser("~"))))
         path, _ = QFileDialog.getSaveFileName(
-            self, "Esporta in PDF", os.path.join(folder, report_filename(content)), "PDF (*.pdf)"
+            self, "Esporta in PDF", os.path.join(folder, report_filename(job.doc)), "PDF (*.pdf)"
         )
         if not path:
-            return
+            return False
         if not path.lower().endswith(".pdf"):
             path += ".pdf"
         QApplication.setOverrideCursor(Qt.WaitCursor)
         try:
-            pages = export_pdf(content, path)
+            pages = job.export_pdf(path)
         finally:
             QApplication.restoreOverrideCursor()
         if not pages or not os.path.exists(path):
             QMessageBox.warning(self, "Esporta in PDF", f"Impossibile salvare il file:\n{path}")
-            return
+            return False
         self.settings.setValue("pdf_dir", os.path.dirname(path))
         self.statusBar().showMessage(f"PDF salvato ({pages} pagine): {path}", 10000)
+        return True
 
     # ------------------------------------------------------------------ tema
     def set_theme_preference(self, preference: str, persist: bool = True) -> None:
@@ -508,9 +569,14 @@ class MainWindow(QMainWindow):
                 for tab in (self.stats_tab, self.equity_tab, self.analysis_tab, self.trades_tab):
                     tab.update_portfolio(self.portfolio)
                 self.mc_tab.redraw()
+                self.prop_tab.redraw()
             finally:
                 QApplication.restoreOverrideCursor()
         self.statusBar().showMessage(f"Tema: {theme.MODE_LABELS[self._theme_pref]}", 4000)
+
+    def closeEvent(self, event) -> None:
+        release_offscreen(self)
+        super().closeEvent(event)
 
     # ------------------------------------------------------------------ drag & drop
     def dragEnterEvent(self, event) -> None:
@@ -534,6 +600,7 @@ class MainWindow(QMainWindow):
             APP_NAME,
             f"<b>{APP_NAME} {__version__}</b><br><br>"
             "Analisi di export trade di NinjaTrader 8: statistiche, equity curve per strategia e combinate, "
-            "drawdown e simulazione Monte Carlo (shuffle / bootstrap).<br><br>"
-            "Ctrl+P stampa la scheda visibile, Ctrl+Maiusc+P la salva in PDF, Ctrl+T alterna il tema.",
+            "drawdown, simulazione Monte Carlo (shuffle / bootstrap) e simulazione di account prop firm.<br><br>"
+            "Ctrl+P stampa la scheda visibile, Ctrl+Maiusc+P la salva in PDF, Ctrl+Maiusc+R apre il resoconto "
+            "completo, Ctrl+T alterna il tema.",
         )

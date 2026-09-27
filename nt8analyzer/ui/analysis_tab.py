@@ -178,7 +178,7 @@ class AnalysisTab(QWidget):
                     angle=0,
                     pen=pg.mkPen(theme.NEGATIVE, width=1, style=Qt.DashLine),
                     label=f"Max DD {theme.fmt_money(-dd.max_dd)}",
-                    labelOpts={"position": 0.12, "color": theme.NEGATIVE_TEXT, "fill": theme.label_brush(220)},
+                    labelOpts={"position": 0.03, "anchors": [(0, 1), (0, 1)], "color": theme.NEGATIVE_TEXT, "fill": theme.label_brush(220)},
                 )
             )
 
