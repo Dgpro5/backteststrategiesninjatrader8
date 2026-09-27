@@ -18,12 +18,13 @@ def test_app_renders_all_tabs(tmp_path):
     code = main(["--screenshots", str(tmp_path), *files])
     assert code == 0
     shots = sorted(f for f in os.listdir(tmp_path) if f.endswith(".png"))
-    assert len(shots) == 5
+    assert len(shots) == 6
     assert all(os.path.getsize(tmp_path / s) > 10_000 for s in shots)
-    # report di stampa di ogni scheda: PDF + anteprima della prima pagina
+    # report di stampa di ogni scheda e resoconto completo (orizzontale e verticale): PDF + prima pagina
     reports = sorted(os.listdir(tmp_path / "stampa"))
-    assert len([f for f in reports if f.endswith(".pdf")]) == 5
-    assert len([f for f in reports if f.endswith("_pagina1.png")]) == 5
+    assert len([f for f in reports if f.endswith(".pdf")]) == 8
+    assert len([f for f in reports if f.endswith("_pagina1.png")]) == 8
+    assert "resoconto_verticale.pdf" in reports
 
 
 def test_single_strategy_and_toggles(tmp_path):
@@ -156,3 +157,50 @@ def test_resolve_mode():
     assert theme.resolve_mode("light") == "light"
     assert theme.resolve_mode("system") in ("light", "dark")
     assert theme.resolve_mode("qualsiasi") in ("light", "dark")
+
+
+def test_propfirm_tab(tmp_path):
+    import numpy as np
+    from PySide6.QtWidgets import QApplication
+
+    from nt8analyzer.propfirm import DAILY_STOP, DD_STATIC, PASSED
+    from nt8analyzer.ui import theme
+    from nt8analyzer.ui.main_window import MainWindow
+
+    app = QApplication.instance() or QApplication([])
+    theme.set_mode("light")
+    theme.apply_theme(app)
+    window = MainWindow(theme_preference="light", persist_theme=False)
+    try:
+        window.load_files(sorted(glob.glob(os.path.join(EXAMPLES_DIR, "*.csv"))), interactive=False)
+        tab = window.prop_tab
+        assert window.tabs.tabText(3) == "Prop Firm"
+        assert tab.result is not None  # calcolata al caricamento
+        tab.max_dd.setValue(900)
+        tab.daily.setValue(300)
+        tab.daily_action.setCurrentIndex(tab.daily_action.findData(DAILY_STOP))
+        tab.dd_type.setCurrentIndex(tab.dd_type.findData(DD_STATIC))
+        assert not tab.trailing_lock.isEnabled()  # il blocco del trailing non vale per il drawdown statico
+        tab.sims.setValue(300)
+        tab.seed.setValue(5)
+        tab.run()
+        r = tab.result
+        assert r.n_sims == 300 and r.config.max_drawdown == 900 and r.config.daily_action == DAILY_STOP
+        assert tab.kpis[0].value.text().endswith("%")
+        assert tab.outcomes.rowCount() == 4 and tab.timing.rowCount() == 5
+        if (r.eval_outcome == PASSED).any():
+            assert tab._hover_hist("pass", float(np.median(r.eval_days[r.passed])))
+        assert tab._hover_paths(10, 0)
+        # parametri salvati e ricalcolo automatico quando cambiano
+        assert float(window.settings.value("prop/dd")) == 900
+        tab.target.setValue(2500)
+        assert tab._auto_timer.isActive()
+        tab._auto_timer.stop()
+        # cambio di tema: ridisegna senza ricalcolare
+        window.set_theme_preference("dark", persist=False)
+        assert tab.result is r
+        assert tab.plot.backgroundBrush().color().name() == theme.DARK["SURFACE"]
+    finally:
+        theme.set_mode("light")
+        theme.apply_theme(app)
+        window.close()

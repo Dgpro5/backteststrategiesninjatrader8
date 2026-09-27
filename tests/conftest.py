@@ -26,3 +26,19 @@ NT_SAMPLE = """Trade number,Instrument,Account,Strategy,Market pos.,Qty,Entry pr
 3,MNQ 12-26,Backtest,VaultbreakNQ,Long,1,20449.25,20499.25,2/2/2024 10:55:00 AM,2/2/2024 11:35:00 AM,VB_Long,Profit target,$100.00,$198.00,$0.00,$0.00,$0.00,$0.00,$0.00,$21.00,$100.00,$0.00,9,
 4,MNQ 12-26,Backtest,VaultbreakNQ,Long,1,20931.75,20831.75,3/12/2024 9:55:00 AM,3/12/2024 11:50:00 AM,VB_Long,Stop loss,($200.00),($2.00),$0.00,$0.00,$0.00,$0.00,$0.00,$200.00,$49.00,$249.00,24,
 """
+
+
+try:
+    import pytest
+
+    @pytest.fixture(autouse=True)
+    def _delete_closed_windows():
+        """Le finestre chiuse vengono eliminate davvero (WA_DeleteOnClose) prima del test seguente:
+        altrimenti ogni cambio di tema ridisegnerebbe anche i widget dei test precedenti."""
+        yield
+        from PySide6.QtCore import QCoreApplication, QEvent
+
+        if QCoreApplication.instance() is not None:
+            QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+except ImportError:
+    pass

@@ -65,8 +65,8 @@ def main(argv: list[str] | None = None) -> int:
 def _take_screenshots(app, window, folder: str) -> int:
     """Modalità di verifica: salva un PNG di ogni scheda e, in ``stampa/``, il report PDF
     di ogni scheda con l'anteprima della prima pagina, poi esce."""
-    from .ui.print_templates import build_report
-    from .ui.report import export_pdf, render_images
+    from .ui.print_templates import build_full_report, build_report
+    from .ui.report import LANDSCAPE, PORTRAIT, PrintJob, export_pdf, render_images
 
     os.makedirs(folder, exist_ok=True)
     if window.portfolio is None or window.portfolio.empty:
@@ -90,6 +90,17 @@ def _take_screenshots(app, window, folder: str) -> int:
         first = render_images(content, max_pages=1) if pages else []
         ok &= bool(first) and first[0].save(os.path.join(reports, f"{name}_pagina1.png"))
         print(f"salvato {pdf} ({pages} pagine)")
+    # resoconto completo, su foglio orizzontale e verticale
+    doc = build_full_report(window)
+    for label, orientation in (("orizzontale", LANDSCAPE), ("verticale", PORTRAIT)):
+        job = PrintJob(doc, orientation)
+        pdf = os.path.join(reports, f"resoconto_{label}.pdf")
+        pages = job.export_pdf(pdf)
+        ok &= pages == len(job.layout) and os.path.exists(pdf)
+        first = job.render_images(max_pages=1)
+        ok &= bool(first) and first[0].save(os.path.join(reports, f"resoconto_{label}_pagina1.png"))
+        print(f"salvato {pdf} ({pages} pagine)")
+    window.close()
     return 0 if ok else 1
 
 

@@ -384,6 +384,18 @@ def _check_image() -> str:
     return _image_file("check", 28, 28, draw)
 
 
+def _dash_image() -> str:
+    """Trattino per le caselle parzialmente spuntate (es. sezione con solo alcune pagine scelte)."""
+
+    def draw(painter: QPainter) -> None:
+        pen = QPen(QColor("#ffffff"), 4)
+        pen.setCapStyle(Qt.RoundCap)
+        painter.setPen(pen)
+        painter.drawLine(QPointF(7, 14), QPointF(21, 14))
+
+    return _image_file("dash", 28, 28, draw)
+
+
 def _arrow_image(direction: str, color: str) -> str:
     points = [QPointF(2, 9), QPointF(8, 2), QPointF(14, 9)] if direction == "up" else [
         QPointF(2, 1), QPointF(8, 8), QPointF(14, 1)
@@ -398,7 +410,7 @@ def _arrow_image(direction: str, color: str) -> str:
 
 
 def stylesheet() -> str:
-    check = _check_image()
+    check, dash = _check_image(), _dash_image()
     up, down = _arrow_image("up", INK_2), _arrow_image("down", INK_2)
     return f"""
 QMainWindow, QWidget#page {{ background: {PAGE}; }}
@@ -464,6 +476,18 @@ QCheckBox::indicator, QAbstractItemView::indicator {{
 QCheckBox::indicator:hover, QAbstractItemView::indicator:hover {{ border-color: {ACCENT}; }}
 QCheckBox::indicator:checked, QAbstractItemView::indicator:checked {{
     background: {ACCENT}; border-color: {ACCENT}; image: url({check});
+}}
+QCheckBox::indicator:indeterminate, QAbstractItemView::indicator:indeterminate {{
+    background: {ACCENT}; border-color: {ACCENT}; image: url({dash});
+}}
+QRadioButton::indicator {{
+    width: 12px; height: 12px; border: 1px solid {MUTED}; border-radius: 7px; background: {BASE};
+}}
+QRadioButton::indicator:hover {{ border-color: {ACCENT}; }}
+QRadioButton::indicator:checked {{
+    border-color: {ACCENT};
+    background: qradialgradient(cx:0.5, cy:0.5, radius:0.5, fx:0.5, fy:0.5,
+                                stop:0 #ffffff, stop:0.32 #ffffff, stop:0.42 {ACCENT}, stop:1 {ACCENT});
 }}
 QMenuBar {{ background: {PAGE}; color: {INK}; }}
 QMenuBar::item:selected {{ background: {HEADER_BG}; }}

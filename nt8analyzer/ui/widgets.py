@@ -7,6 +7,7 @@ from typing import Callable
 
 import numpy as np
 import pyqtgraph as pg
+import shiboken6
 from PySide6.QtCore import QEvent, QObject, Qt
 from PySide6.QtWidgets import QFrame, QLabel, QSizePolicy, QVBoxLayout, QWidget
 
@@ -20,12 +21,23 @@ _HOVERS: "weakref.WeakSet[HoverTip]" = weakref.WeakSet()
 
 def restyle_all() -> None:
     """Riapplica i colori del tema corrente a grafici, legende e tooltip già creati."""
-    for widget in list(_PLOTS):
-        style_plot(widget)
-    for legend in list(_LEGENDS):
-        style_legend(legend)
+    for registry, restyle in ((_PLOTS, style_plot), (_LEGENDS, style_legend), (_HOVERS, lambda h: h.restyle())):
+        for obj in list(registry):
+            if shiboken6.isValid(obj) and (not isinstance(obj, HoverTip) or shiboken6.isValid(obj.widget)):
+                restyle(obj)
+            else:  # oggetto Qt già distrutto (es. finestra chiusa)
+                registry.discard(obj)
+
+
+def forget(widget: pg.PlotWidget) -> None:
+    """Esclude un grafico dai cambi di tema (es. la copia fuori schermo usata per la stampa)."""
+    _PLOTS.discard(widget)
+    legend = getattr(widget.getPlotItem(), "legend", None)
+    if legend is not None:
+        _LEGENDS.discard(legend)
     for hover in list(_HOVERS):
-        hover.restyle()
+        if hover.widget is widget:
+            _HOVERS.discard(hover)
 
 
 class MoneyAxis(pg.AxisItem):

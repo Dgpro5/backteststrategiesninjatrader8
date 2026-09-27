@@ -192,7 +192,7 @@ class EquityTab(QWidget):
             movable=False,
             pen=pg.mkPen(theme.MC_WORST, width=1.2, style=Qt.DashLine),
             label=f"Max DD {who}: {theme.fmt_money(-info.max_dd)}",
-            labelOpts={"position": 0.12, "color": theme.NEGATIVE_TEXT, "fill": theme.label_brush(220)},
+            labelOpts={"position": 0.03, "anchors": [(0, 1), (0, 1)], "color": theme.NEGATIVE_TEXT, "fill": theme.label_brush(220)},
         )
         self.dd_plot.addItem(line)
         trough = pg.ScatterPlotItem([xt], [-info.max_dd], symbol="o", size=9, brush=pg.mkBrush(theme.MC_WORST), pen=theme.ring_pen(1.0))
